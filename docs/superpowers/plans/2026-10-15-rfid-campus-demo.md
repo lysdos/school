@@ -552,6 +552,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from datetime import datetime
 from pathlib import Path
 
 from .models import Direction, Student, SwipeEvent, SwipeStatus
@@ -681,8 +682,6 @@ class Database:
     # ---------- swipes ----------
 
     def insert_swipe(self, event: SwipeEvent) -> SwipeEvent:
-        from datetime import datetime
-
         created_at = datetime.now().isoformat(timespec="seconds")
         with self._lock:
             cur = self._conn.execute(
@@ -704,6 +703,11 @@ class Database:
         return SwipeEvent(**{**event.__dict__, "id": new_id})
 
     def _swipe_where(self, name, student_no, date) -> tuple[str, list]:
+        """拼 WHERE 子句。
+
+        SQL 片段只从下面这三个固定模板里选，不拼接任何外部输入；
+        所有用户提供的值都走 params 绑定，因此下面的 f-string 是安全的。
+        """
         clauses: list[str] = []
         params: list = []
         if name:
@@ -1328,24 +1332,19 @@ Expected: 新增的 8 个用例中 `test_swipe_within_dedup_window_is_silently_d
         # 第二级：重复刷卡窗口内记录并告警，但不翻转状态。
         # 同时刷新 last_swipe_at —— 否则学生在闸机前久留时窗口会从旧事件起算而过期，
         # 导致"人还在门口却被判为出校"。
-        if elapsed is not None and elapsed < self._duplicate_window:
-            saved = self._db.insert_swipe(SwipeEvent(
-                id=None, epc=epc, student_no=student.student_no, name=student.name,
-                direction=direction, status=SwipeStatus.DUPLICATE,
-                rssi=tag.rssi, ant_id=tag.ant_id, reader_addr=tag.reader_addr,
-                swiped_at=now_iso,
-            ))
-            self._db.set_student_state(epc, in_campus, now_iso, today)
-            return saved
+        is_duplicate = elapsed is not None and elapsed < self._duplicate_window
 
-        # 正常翻转
         saved = self._db.insert_swipe(SwipeEvent(
             id=None, epc=epc, student_no=student.student_no, name=student.name,
-            direction=direction, status=SwipeStatus.OK,
+            direction=direction,
+            status=SwipeStatus.DUPLICATE if is_duplicate else SwipeStatus.OK,
             rssi=tag.rssi, ant_id=tag.ant_id, reader_addr=tag.reader_addr,
             swiped_at=now_iso,
         ))
-        self._db.set_student_state(epc, not in_campus, now_iso, today)
+        # 重复刷卡保持原状态，正常刷卡才翻转
+        self._db.set_student_state(
+            epc, in_campus if is_duplicate else not in_campus, now_iso, today
+        )
         return saved
 ```
 
