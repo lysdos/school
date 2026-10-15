@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# 运行期生成的数据库（名单 xlsx 要提交）
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# SDD 工作区（ledger、brief、报告等临时产物）
+.superpowers/
