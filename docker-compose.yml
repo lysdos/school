@@ -1,0 +1,19 @@
+services:
+  campus:
+    build: .
+    container_name: rfid-campus-demo
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      TZ: Asia/Shanghai
+      RDR_HOST: "192.168.1.168"
+      RDR_PORT: "8160"
+      RDR_ANTENNA: "1"
+      RDR_POWER: "30"
+      RDR_REPEATED_TIME: "50"
+      DEDUP_WINDOW: "10"
+      DUPLICATE_WINDOW: "120"
+      USE_DEVICE_BEEP: "0"
+    restart: unless-stopped

@@ -1,0 +1,16 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.superpowers
+docs
+tests
+
+# 运行期生成的数据库；data/学生记录.xlsx 需要进镜像，所以不整体排除 data/
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# 不要排除 tools/ —— 设计文档要求模拟器能在容器内跑，用于演示兜底
