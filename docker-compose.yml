@@ -3,7 +3,11 @@ services:
     build: .
     container_name: rfid-campus-demo
     ports:
-      - "8000:8000"
+      # 宿主机端口默认 9000 而不是 8000：Windows 的「排除端口段」包含 7989-8088，
+      # Docker 绑定 0.0.0.0:8000 会被系统拒绝（报 "access permissions" 错误）。
+      # 用 netsh interface ipv4 show excludedportrange protocol=tcp 可以查看本机的保留段。
+      # 容器内部仍然是 8000，不受影响。
+      - "${HOST_PORT:-9600}:8000"
     volumes:
       - ./data:/app/data
     environment:

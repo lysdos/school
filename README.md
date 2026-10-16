@@ -13,9 +13,21 @@ mkdir -p data && cp "E:/Code/school/学生记录.xlsx" data/
 docker compose up --build -d
 
 # 3. 打开看板
-#    http://localhost:8000
-#    接口文档 http://localhost:8000/docs
+#    http://localhost:9600
+#    接口文档 http://localhost:9600/docs
 ```
+
+> **为什么是 9600 而不是 8000？** Windows 的「排除端口段」默认包含 7989–8088，
+> Docker 绑定 `0.0.0.0:8000` 会被系统拒绝并报 `access permissions` 错误。
+> 用 `netsh interface ipv4 show excludedportrange protocol=tcp` 可以查看本机的保留段。
+>
+> 换端口：`HOST_PORT=9700 docker compose up -d`
+> （先确认该端口既不在保留段内、也没被别的程序占用）。
+> 容器内部始终监听 8000，不受影响。
+>
+> 从宿主机跑模拟器时要指到映射后的端口：
+> `python tools/simulate.py --base-url http://127.0.0.1:9600`；
+> 或者直接在容器里跑，就不用管端口：`docker compose exec campus python tools/simulate.py`
 
 ## 本地开发（不用 Docker）
 
