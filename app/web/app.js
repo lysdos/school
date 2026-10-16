@@ -47,21 +47,38 @@ function renderStats(stats) {
   document.getElementById('stat-total').textContent = stats.total_students;
 }
 
-function pushLive(event) {
-  const list = document.getElementById('live');
-  const empty = list.querySelector('.empty');
-  if (empty) empty.remove();
-
-  const li = document.createElement('li');
+function renderLiveItem(li, event) {
   li.className = 'live-item ' + rowClass(event);
   const who = event.name || ('未登记卡 …' + event.epc.slice(-6));
   li.innerHTML = '<span class="t">' + fmtTime(event.swiped_at) + '</span>' +
                  '<span class="who">' + who + '</span>' +
                  '<span class="what">' + labelFor(event) + '</span>';
-  list.prepend(li);
+}
 
-  while (list.children.length > MAX_LIVE_ITEMS) {
-    list.lastElementChild.remove();
+function findLiveItem(list, epc) {
+  // 用遍历而不是 CSS 属性选择器：EPC 来自读卡器，不该拼进选择器字符串
+  return Array.prototype.find.call(list.children, (el) => el.dataset.epc === epc);
+}
+
+function pushLive(event) {
+  const list = document.getElementById('live');
+  const empty = list.querySelector('.empty');
+  if (empty) empty.remove();
+
+  // 同一个 EPC 只占一行：常驻标签反复上报时就地更新时间并提到顶部，
+  // 不再堆叠新行把学生卡刷下去。事件本身仍然照常入库。
+  const existing = findLiveItem(list, event.epc);
+  if (existing) {
+    renderLiveItem(existing, event);
+    list.prepend(existing);
+  } else {
+    const li = document.createElement('li');
+    li.dataset.epc = event.epc;
+    renderLiveItem(li, event);
+    list.prepend(li);
+    while (list.children.length > MAX_LIVE_ITEMS) {
+      list.lastElementChild.remove();
+    }
   }
   beep(event.status === 'ok');
 }
