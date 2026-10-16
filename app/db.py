@@ -219,6 +219,25 @@ class Database:
             ).fetchone()
         return int(row["n"])
 
+    def reset_all(self) -> dict:
+        """清空所有刷卡记录，并把学生状态复位为「离校」。**名单保留**。
+
+        只有这个操作是破坏性的，调用方（`POST /api/reset`）必须让用户二次确认。
+        """
+        with self._lock:
+            cleared = self._conn.execute("DELETE FROM swipes").rowcount
+            reset = self._conn.execute(
+                """
+                UPDATE students
+                   SET in_campus      = 0,
+                       last_swipe_at  = NULL,
+                       last_logged_at = NULL,
+                       state_date     = NULL
+                """
+            ).rowcount
+            self._conn.commit()
+        return {"cleared_swipes": cleared, "reset_students": reset}
+
     def today_stats(self, today: str) -> dict:
         prefix = f"{today}%"
         with self._lock:

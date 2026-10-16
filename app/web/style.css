@@ -74,6 +74,12 @@ body {
 }
 .btn-ghost:hover { background: var(--panel-alt); border-color: var(--accent); }
 
+/* 破坏性操作：视觉上必须和普通按钮区分开 */
+.btn-danger {
+  background: #fff; border: 1px solid var(--error); color: var(--error);
+}
+.btn-danger:hover { background: var(--error); border-color: var(--error); color: #fff; }
+
 /* ---------- 统计卡片 ---------- */
 
 .stats {

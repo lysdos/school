@@ -125,6 +125,45 @@ def test_simulate_requires_epc(client):
     assert client.post("/api/simulate").status_code == 422
 
 
+def test_reset_clears_data_and_unblocks_new_swipes(client):
+    client.post("/api/simulate", params={"epc": EPC_LI})
+    client.post("/api/simulate", params={"epc": EPC_UNKNOWN})
+    assert client.get("/api/swipes").json()["total"] == 2
+
+    body = client.post("/api/reset").json()
+    assert body["cleared_swipes"] == 2
+    assert body["reset_students"] == 1
+
+    assert client.get("/api/swipes").json()["total"] == 0
+    stats = client.get("/api/stats/today").json()
+    assert stats["in_count"] == 0
+    assert stats["in_campus_count"] == 0
+    assert stats["total_students"] == 1          # 名单保留
+
+    # 关键：清空后同一张卡立刻再刷要能记下来，不该被去重窗口挡住
+    again = client.post("/api/simulate", params={"epc": EPC_LI}).json()
+    assert again["accepted"] is True
+    assert again["event"]["direction"] == "in"
+
+
+def test_reset_clears_unknown_tag_dedup_too(tmp_path):
+    """内存里的未登记卡去重表也要清，否则「清空」是假清空。"""
+    cfg = _cfg(tmp_path)
+    db = Database(cfg.db_path)
+    service = SwipeService(db, 10.0, 120.0)
+    app = create_app(cfg, db, service, FakeReader(), EventBus())
+    with TestClient(app) as c:
+        c.post("/api/simulate", params={"epc": EPC_UNKNOWN})
+        assert service.unknown_tracked_count == 1
+
+        c.post("/api/reset")
+        assert service.unknown_tracked_count == 0
+
+        body = c.post("/api/simulate", params={"epc": EPC_UNKNOWN}).json()
+        assert body["accepted"] is True
+    db.close()
+
+
 def test_swipes_registered_only_filters_unknown_cards(client):
     client.post("/api/simulate", params={"epc": EPC_LI})
     client.post("/api/simulate", params={"epc": EPC_UNKNOWN})

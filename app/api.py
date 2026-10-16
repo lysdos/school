@@ -120,6 +120,17 @@ def create_app(cfg: Config, db: Database, service: SwipeService,
         bus.publish_threadsafe(payload)
         return {"accepted": True, "event": payload}
 
+    @app.post("/api/reset")
+    def reset_data() -> dict:
+        """清空所有刷卡记录并把学生状态复位为「离校」。名单保留。
+
+        **不可撤销**。看板侧调用前必须让用户二次确认。
+        内存里的未登记卡去重表也要一起清，否则不是真的清空。
+        """
+        result = db.reset_all()
+        service.reset_dedup_state()
+        return result
+
     if WEB_DIR.exists():
         app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
 

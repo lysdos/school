@@ -79,6 +79,9 @@ class UnknownTagTracker:
     def get(self, epc: str) -> tuple[str | None, str | None]:
         return self._entries.get(epc, (None, None))
 
+    def clear(self) -> None:
+        self._entries.clear()
+
     def update(self, epc: str, last_seen_iso: str, last_logged_iso: str | None,
                now: datetime) -> None:
         """last_logged_iso 传 None 表示本次没写库，保留原值。"""
@@ -112,6 +115,14 @@ class SwipeService:
     @property
     def unknown_tracked_count(self) -> int:
         return len(self._unknown)
+
+    def reset_dedup_state(self) -> None:
+        """清空未登记卡的内存去重表。
+
+        数据库重置时必须一起调，否则「清空」是假清空 ——
+        内存里还留着这些标签的「刚见过」记录，重置后它们要等窗口过期才会重新上报。
+        """
+        self._unknown.clear()
 
     def process(self, tag: RawTagEvent, now: datetime) -> SwipeEvent | None:
         epc = normalize_epc(tag.epc)

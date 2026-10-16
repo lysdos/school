@@ -10,7 +10,7 @@ from app.db import Database
 from app.service import SwipeService
 
 REQUIRED_IDS = [
-    "conn-dot", "conn-text", "beep-toggle",
+    "conn-dot", "conn-text", "beep-toggle", "reset-data",
     "stat-in", "stat-out", "stat-incampus", "stat-total",
     "live", "query", "q-name", "q-date", "q-reset",
     "history", "prev", "next", "page-info",

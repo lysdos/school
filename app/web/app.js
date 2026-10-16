@@ -152,6 +152,31 @@ async function loadHistory() {
   document.getElementById('next').disabled = state.page >= pages;
 }
 
+async function resetData() {
+  const confirmed = window.confirm(
+    '确定清空所有数据吗？\n\n' +
+    '· 所有进出记录会被删除\n' +
+    '· 所有学生状态复位为「离校」\n' +
+    '· 学生名单保留\n\n' +
+    '此操作不可撤销。'
+  );
+  if (!confirmed) return;
+
+  try {
+    const res = await fetch('/api/reset', { method: 'POST' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const result = await res.json();
+
+    document.getElementById('live').innerHTML = '<li class="empty">等待刷卡…</li>';
+    state.page = 1;
+    await Promise.all([refreshStats(), loadHistory()]);
+    window.alert('已清空：删除 ' + result.cleared_swipes + ' 条记录，复位 ' +
+                 result.reset_students + ' 名学生。');
+  } catch (err) {
+    window.alert('清空失败：' + err.message);
+  }
+}
+
 function initBeep() {
   const btn = document.getElementById('beep-toggle');
   btn.addEventListener('click', () => {
@@ -192,6 +217,7 @@ function init() {
     state.page += 1;
     loadHistory();
   });
+  document.getElementById('reset-data').addEventListener('click', resetData);
 }
 
 document.addEventListener('DOMContentLoaded', init);

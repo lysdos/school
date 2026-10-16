@@ -160,6 +160,43 @@ def test_today_stats(db):
     assert stats["date"] == "2026-10-15"
 
 
+def test_reset_all_clears_swipes_and_resets_students(db):
+    db.upsert_student("A1", "1001", "张三", "2026-10-15T00:00:00")
+    db.upsert_student("A2", "1002", "李四", "2026-10-15T00:00:00")
+    db.set_student_state("A1", True, "2026-10-15T08:00:00", "2026-10-15",
+                         last_logged_at="2026-10-15T08:00:00")
+    db.insert_swipe(_event())
+    db.insert_swipe(_event())
+
+    result = db.reset_all()
+
+    assert result == {"cleared_swipes": 2, "reset_students": 2}
+    assert db.count_swipes() == 0
+
+    # 名单保留，但状态复位、时间戳清空
+    assert len(db.list_students()) == 2
+    s = db.get_student("A1")
+    assert s.in_campus is False
+    assert s.last_swipe_at is None
+    assert s.last_logged_at is None
+    assert s.state_date is None
+    assert s.name == "张三"
+
+
+def test_reset_all_on_empty_db_is_safe(db):
+    assert db.reset_all() == {"cleared_swipes": 0, "reset_students": 0}
+    assert db.today_stats("2026-10-15")["total_students"] == 0
+
+
+def test_swipes_work_again_after_reset(db):
+    db.upsert_student("A1", "1001", "张三", "2026-10-15T00:00:00")
+    db.insert_swipe(_event())
+    db.reset_all()
+    saved = db.insert_swipe(_event())
+    assert saved.id is not None
+    assert db.count_swipes() == 1
+
+
 def test_indexes_exist(db):
     rows = db._conn.execute(
         "SELECT name FROM sqlite_master WHERE type='index'"
