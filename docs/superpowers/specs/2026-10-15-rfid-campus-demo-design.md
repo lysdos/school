@@ -1,7 +1,11 @@
 # 基于 RFID 读卡器的学生出入校园 Demo — 设计文档
 
 日期：2026-10-15
-状态：已确认，待编写实施计划
+状态：**已实施并完成真机联调**（2026-10-16）。实施中的偏差与实测结果见 §7.3、§12、§17。
+
+> 本文档已按最终实现更新。特别提醒：§7.3 描述的是**真机联调后修正过**的设计 ——
+> 初版把「状态锚点」和「写入节流」合在一个字段里，导致常驻标签以约 2400 条/分钟
+> 的速度写库。那段错误设计的来龙去脉保留在 §7.3 里作为记录。
 
 ---
 
@@ -72,6 +76,7 @@ uhfReaderApi-Cykeo==1.0.9
 fastapi
 uvicorn[standard]
 openpyxl
+PyYAML
 ```
 
 ---
@@ -98,11 +103,11 @@ openpyxl
 │         │                                     ▼             │
 │  ┌──────┴──────┐                    ┌───────────────────┐  │
 │  │ 读写器       │                    │ uvicorn (FastAPI) │  │
-│  │ 192.168.1.168│                    │ REST + SSE + 静态 │  │
+│  │ 192.168.0.30 │                    │ REST + SSE + 静态 │  │
 │  └─────────────┘                    └───────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
                                                ▲
-                                               │ HTTP :8000
+                                               │ HTTP :9600
                                           ┌────┴────┐
                                           │  浏览器  │
                                           └─────────┘
@@ -169,13 +174,14 @@ E:\Code\school\rfid-campus-demo\
 
 ```sql
 CREATE TABLE students (
-    epc           TEXT PRIMARY KEY,   -- 大写十六进制，如 E28011B0A50500756E79A1C9
-    student_no    TEXT NOT NULL,
-    name          TEXT NOT NULL,
-    in_campus     INTEGER NOT NULL DEFAULT 0,   -- 0 离校 / 1 在校
-    last_swipe_at TEXT,               -- ISO8601 本地时间
-    state_date    TEXT,               -- 状态所属日期（YYYY-MM-DD），用于跨天自动重置
-    created_at    TEXT NOT NULL
+    epc            TEXT PRIMARY KEY,  -- 大写十六进制，如 E28011B0A50500756E79A1C9
+    student_no     TEXT NOT NULL,
+    name           TEXT NOT NULL,
+    in_campus      INTEGER NOT NULL DEFAULT 0,  -- 0 离校 / 1 在校
+    last_swipe_at  TEXT,              -- 状态锚点：每次有效读到就刷新
+    last_logged_at TEXT,              -- 写入节流：只在真正写库时刷新
+    state_date     TEXT,              -- 状态所属日期（YYYY-MM-DD），用于跨天自动重置
+    created_at     TEXT NOT NULL
 );
 
 CREATE TABLE swipes (
@@ -187,7 +193,7 @@ CREATE TABLE swipes (
     status      TEXT NOT NULL,        -- 'ok' | 'unknown_card' | 'duplicate'
     rssi        INTEGER,
     ant_id      INTEGER,
-    reader_addr TEXT,                 -- '192.168.1.168:8160'
+    reader_addr TEXT,                 -- '192.168.0.30:8160'
     swiped_at   TEXT NOT NULL,        -- ISO8601 本地时间
     created_at  TEXT NOT NULL
 );
@@ -201,6 +207,10 @@ CREATE INDEX idx_swipes_no_date   ON swipes(student_no, swiped_at);
 
 - **`in_campus` 直接放 `students` 表**，不单开状态表。名单只有几百人，一表读写最简单；未登记卡没有 students 行，天然不需要跟踪状态。
 - **`state_date` 做跨天重置**。不写定时任务，而是在刷卡时比对 `state_date != 今天` 就把 `in_campus` 视为 0。这样程序半夜不跑也没关系，第二天第一个人刷卡时状态自动归零。比 cron 干净。
+- **`last_swipe_at` 与 `last_logged_at` 必须分开**（真机联调后补的）。初版只有一个字段，
+  导致常驻标签每 10 秒写一条库、永不停止。详见 §7.3。
+- **未登记卡不落 `students` 表**，它的两个时间戳放在 `UnknownTagTracker` 内存表里。
+  它只是限流器而非业务状态，重启后最多多写一轮，不值得为它建表。
 - **未登记卡**：`student_no` / `name` 留 NULL，用 `status='unknown_card'` 区分，`direction='unknown'`。
 - **EPC 归一化**：读写器上报的 EPC 与 xlsx 中的都统一转成**大写**存储和比对，避免大小写导致匹配失败。
 - **时间戳**：全部用本地时间 ISO8601 字符串存储（容器内 `TZ=Asia/Shanghai`）。SQLite 无原生日期类型，ISO8601 字符串可直接做字典序比较和 `LIKE '2026-10-15%'` 前缀查询。
@@ -213,7 +223,7 @@ CREATE INDEX idx_swipes_no_date   ON swipes(student_no, swiped_at);
 
 本次采用**单天线 + 状态翻转**。同一个人第一次刷判为"进"，再次刷判为"出"，交替。
 
-**这不是真正的方向判定**——它无法区分"刚进门又出门"和"出门又进门"的顺序错误。真方向需要双天线（同一读卡器两根天线判先后）或 GPI 传感器（红外对射/地感）。本 Demo 明确不做，接口上留好扩展位：`service.py` 里方向判定收敛到单个函数 `decide_direction(student, now)`，将来换双天线只需改这一个函数。
+**这不是真正的方向判定**——它无法区分"刚进门又出门"和"出门又进门"的顺序错误。真方向需要双天线（同一读卡器两根天线判先后）或 GPI 传感器（红外对射/地感）。本 Demo 明确不做，接口上留好扩展位：`service.py` 里方向判定收敛到单个函数 `decide_direction(in_campus: bool) -> Direction`，将来换双天线只需改这一个函数。
 
 ### 7.2 处理流程
 
@@ -222,35 +232,72 @@ CREATE INDEX idx_swipes_no_date   ON swipes(student_no, swiped_at);
 ```
 1. EPC 归一化（转大写）
 2. 查 students 表
-   └─ 查不到 → 记 status='unknown_card', direction='unknown'，告警，结束
-3. 跨天重置：state_date != 今天 → 该生 in_campus 置 0
-4. 两级去重窗口：
-   ├─ 距上次刷卡 < dedup_window（默认 10s）  → 静默丢弃，不写库
-   └─ 距上次刷卡 < duplicate_window（默认 120s）→ 写库但 status='duplicate'，不翻转状态
-5. 正常翻转：in_campus=0 → direction='in'，置 1
-             in_campus=1 → direction='out'，置 0
-6. 写 swipes 表，更新 students 行，SSE 广播
+   ├─ 查得到 → 走「已知学生」路径（步骤 3–6）
+   └─ 查不到 → 走「未登记卡」路径（步骤 3′–5′），direction='unknown'
+3. 跨天重置：state_date != 今天 → 该生 in_campus 视为 0
+
+   计算两个「距今多久」（两个域共用同一套判定，见 `_plan()`）：
+     since_swipe = now - last_swipe_at     （距上次有效读到）
+     since_log   = now - last_logged_at    （距上次写库）
+
+4. 判定（`_plan()`）：
+   ├─ since_swipe < dedup_window(10s)      → 丢弃，什么都不动
+   ├─ since_log   < duplicate_window(120s) → 不写库（节流）
+   └─ since_swipe >= duplicate_window(120s)→ 翻转状态，status='ok'
+      since_swipe <  duplicate_window      → 不翻转，status='duplicate'
+
+5. 写库（若判定允许）→ status = 'ok'（翻转）或 'duplicate'（未翻转）
+6. 刷新 last_swipe_at（状态锚点）；若写了库，同时刷新 last_logged_at
+
+3′. 未登记卡没有 students 行，用内存 TTL 表存放同样的两个时间戳
+4′. 判定逻辑与步骤 4 完全一致
+5′. 写库 → status='unknown_card'，direction='unknown'（永不翻转状态）
 ```
 
-**关于 `duplicate` 记录的 `direction` 取值**：仍然存"按规则本应判定的方向"（该生当时 `in_campus=1` 就存 `'out'`，反之存 `'in'`），而不是 `'unknown'`。理由是这条记录供人工复核用，"他这次像是要进校"是有价值的信息；`status='duplicate'` 已经表明该方向未生效。看板渲染时对 `duplicate` 只显示"⚠重复刷卡"，不显示进/出，避免误导。`unknown_card` 才是 `direction='unknown'`。
+**关于 `duplicate` 记录的 `direction` 取值**：存"按当前状态本应判定的方向"（该生当时 `in_campus=1` 就存 `'out'`，反之存 `'in'`），而不是 `'unknown'`。理由是这条记录供人工复核用，"他这次像是要进校"是有价值的信息；`status='duplicate'` 已经表明该方向未生效。看板渲染时对 `duplicate` 只显示"⚠重复刷卡"，不显示进/出，避免误导。`unknown_card` 才是 `direction='unknown'`。
 
-### 7.3 去重与"重复不翻转"的取舍
+### 7.3 状态锚点与写入节流为什么必须分开
 
-**两级窗口的分工**：
+**这是真机联调才暴露的问题，初版设计是错的。**
+
+初版把 `last_swipe_at` 同时用作"状态锚点"和"写入节流阀"：判重靠它、防翻转也靠它。
+问题在于重复刷卡时会刷新它，于是常驻标签的窗口永远不过期，**每 10 秒就写一条库，永不停止**；
+再加上未登记卡这条路径**完全没有去重**，现场 75 个样品标签常驻读取范围时，
+实测写入速率约 **2400 条/分钟**，13 分钟写出 26363 条记录。
+
+拆成两个字段后各司其职：
+
+| 字段 | 何时刷新 | 作用 |
+|---|---|---|
+| `last_swipe_at` | 每次「有效读到」（未被 `dedup_window` 丢弃） | 状态锚点。保证逗留时「在校」不来回翻 |
+| `last_logged_at` | 只在真正写库时 | 写入节流。同一 EPC 每个 `duplicate_window` 最多一条 |
+
+结果是两者兼顾：学生在读卡范围内逗留 10 分钟，「在校」状态纹丝不动，
+而写库次数被限制在每 120 秒一条。真机复测 **2400 → 23 条/分钟**。
+
+**去重窗口的分工**：
 
 - `dedup_window`（默认 10 秒）：纯软件兜底，静默丢弃，不写库。
-- 设备侧同时配置 `MsgBaseSetTagLog(RepeatedTime=50)`（单位 10ms，即 500ms），让读写器自己先过滤一遍同标签重复上报，减轻回调压力。
+- 设备侧同时配置 `MsgBaseSetTagLog(repeatedTime=50)`（单位 10ms，即 500ms），让读写器自己先过滤一遍同标签重复上报。
+  注意参数名是**小写 `repeatedTime`** —— SDK 的 PDF 文档写作 `RepeatedTime`，
+  但实现是 `kwargs.get("repeatedTime")`，写错不会报错、只会静默失效。见 §12 风险 6。
 
-**为什么 `duplicate_window` 内不翻转状态**：人在闸机前停留时标签会被反复读到，如果每次都翻转，"当前在校人数"这个看板数字就会来回跳，而这个数字恰恰是 Demo 最直观的卖点。宁可漏记一次"出门 30 秒又折返"，也要保住统计的可信度。该行为由配置项 `duplicate_window` 控制，可按现场情况调整。
+**代价（已知且接受）**：距上次写库不足 `duplicate_window` 的真实重复刷卡会被节流掉，
+不产生记录。也就是说"出门 30 秒又折返"这类事件不会被记下来。
+这是为了换取"常驻标签不刷爆数据库"而付出的代价，由配置项 `duplicate_window` 调节。
 
 ### 7.4 异常判定小结
 
-| 情况 | status | 是否翻转状态 | 看板表现 |
-|---|---|---|---|
-| 正常刷卡 | `ok` | 是 | 绿色，"李弘毅 入校 08:23" |
-| EPC 不在名单 | `unknown_card` | 否 | 红色告警，"未登记卡 E280…A1C9" |
-| 10s 内重复 | — | 否 | 不显示（静默丢弃） |
-| 10s–120s 重复 | `duplicate` | 否 | 黄色告警，"李弘毅 重复刷卡" |
+| 情况 | status | 是否翻转状态 | 是否写库 | 看板表现 |
+|---|---|---|---|---|
+| 正常刷卡（距上次事件 ≥ 120s） | `ok` | 是 | 是 | 蓝色/绿色，"李弘毅 入校 08:23" |
+| 10s 内重复读到 | — | 否 | 否 | 不显示（静默丢弃） |
+| 10–120s 内重复，且距上次写库 < 120s | — | 否 | 否 | 不显示（节流） |
+| 10–120s 内重复，但距上次写库 ≥ 120s | `duplicate` | 否 | 是 | 琥珀色，"李弘毅 重复刷卡" |
+| EPC 不在名单 | `unknown_card` | 否（无状态） | 同上节流规则 | 红色告警，"未登记卡 E280…A1C9" |
+
+**未登记卡的去重**：与已知学生完全同一套节流规则。真机实测前它完全没有去重，
+现场 75 个标签常驻时这一条路径就贡献了绝大部分写入量。
 
 ---
 
@@ -290,7 +337,7 @@ openTcp((RDR_HOST, RDR_PORT))
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | GET | `/api/stats/today` | 今日进校数、出校数、当前在校人数、学生总数 |
-| GET | `/api/swipes` | 历史查询，参数 `name` / `student_no` / `date` / `page` / `size` |
+| GET | `/api/swipes` | 历史查询，参数 `name` / `student_no` / `date` / `registered_only` / `page` / `size` |
 | GET | `/api/students` | 学生名单 + 每人当前在校状态 |
 | GET | `/api/events/stream` | SSE 实时推送刷卡事件 |
 | POST | `/api/simulate` | 模拟刷卡（演示兜底，不依赖真卡） |
@@ -358,14 +405,27 @@ data: {"id":42,"epc":"E28011B0A50500756E79A1C9","student_no":"1424764951",
 
 ```dockerfile
 FROM python:3.12-slim
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 TZ=Asia/Shanghai
 WORKDIR /app
+
+# SDK 的 uhf.reader.communication 在模块级就 import HidClient/BLEClient，
+# 即使本项目只用 TCP 也会连带加载 hidapi —— 不装 libusb 直接报错
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libusb-1.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ ./app/
+COPY tools/ ./tools/
 COPY config.yaml .
+RUN mkdir -p /app/data
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
 ```
+
+注意 `--factory`：`app.main` 模块**故意不在导入时创建应用**，
+否则 `import app.main` 就会尝试连读卡器，测试和无硬件环境都会挂。
 
 ### `docker-compose.yml`
 
@@ -373,16 +433,21 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 services:
   campus:
     build: .
+    container_name: rfid-campus-demo
     ports:
-      - "8000:8000"
+      # 宿主机端口默认 9600 而不是 8000：Windows 的「排除端口段」包含 7989-8088，
+      # Docker 绑定 0.0.0.0:8000 会被系统拒绝（报 access permissions）。
+      # 容器内部仍然是 8000，不受影响。
+      - "${HOST_PORT:-9600}:8000"
     volumes:
       - ./data:/app/data          # SQLite 和 xlsx 都在这里，容器删了数据还在
     environment:
       TZ: Asia/Shanghai           # 关键：否则"今日统计"按 UTC 算会差 8 小时
-      RDR_HOST: "192.168.1.168"
+      RDR_HOST: "192.168.0.30"    # 本部署实际地址，不是 SDK 示例里的 192.168.1.168
       RDR_PORT: "8160"
       RDR_ANTENNA: "1"
       RDR_POWER: "30"
+      RDR_REPEATED_TIME: "50"     # 设备侧去重，单位 10ms
       DEDUP_WINDOW: "10"
       DUPLICATE_WINDOW: "120"
       USE_DEVICE_BEEP: "0"
@@ -401,13 +466,17 @@ services:
 
 ## 12. 已知风险
 
-| # | 风险 | 影响 | 应对 |
+| # | 风险 | 状态 | 说明 |
 |---|---|---|---|
-| 1 | 容器访问 LAN 设备 | 容器连不上 `192.168.1.168` | Windows Docker Desktop **不支持 `network_mode: host`**，走 bridge + NAT 通常可行。若不通，备选：把读卡器配成"客户端模式"主动连容器映射出的端口，代码改用 `GServer` 方向（SDK 支持）。实施第一步就验证连通性。 |
-| 2 | SDK 安装 | 镜像构建失败 | `uhfReaderApi-Cykeo==1.0.9` 需能从 PyPI 拉到。备选：SDK 文档给的清华源 `-i https://pypi.tuna.tsinghua.edu.cn/simple`；再不行本地下载 wheel 后 `COPY` 进镜像。 |
-| 3 | 设备侧蜂鸣器发不出去 | 无声音反馈 | 已用前端提示音兜底，`use_device_beep` 默认关闭。真机验证后再开。 |
-| 4 | 单天线非真方向 | 无法区分"刚进又出" | 已明确排除在本次范围外，见 §7.1。方向判定收敛在 `decide_direction()` 单函数内，便于将来替换。 |
-| 5 | EPC 大小写不一致 | 匹配不上学生 | 统一转大写存储与比对。 |
+| 1 | 容器访问 LAN 设备 | ✅ 已消除 | Windows Docker Desktop 不支持 `network_mode: host`，实测 bridge + NAT 可直接访问 `192.168.0.30:8160`，无需备选方案。 |
+| 2 | SDK 安装 | ✅ 已消除 | `uhfReaderApi-Cykeo==1.0.9` 在 Windows 与 `python:3.12-slim` 容器内都装得上。**但容器里必须装 `libusb-1.0-0`**：SDK 的 `uhf.reader.communication` 在模块级就 import `HidClient`/`BLEClient`，即使本项目只用 TCP 也会连带加载 hidapi。已写进 Dockerfile。 |
+| 3 | 设备侧蜂鸣器发不出去 | ⚠️ 未验证 | 已用前端提示音兜底，`use_device_beep` 默认关闭。 |
+| 4 | 单天线非真方向 | ⚠️ 已知限制 | 已明确排除在本次范围外，见 §7.1。方向判定收敛在 `decide_direction()` 单函数内，便于将来替换。 |
+| 5 | EPC 大小写不一致 | ✅ 已消除 | 统一转大写存储与比对。 |
+| 6 | **SDK 文档与实现参数名不一致** | ✅ 已消除 | PDF 文档写 `MsgBaseSetTagLog(RepeatedTime=...)`，实现却是 `kwargs.get("repeatedTime")`（小写）。因为签名是 `**kwargs`，传大写不报错、只静默失效 → 设备侧去重完全不生效。已修正并在 `tests/test_reader.py` 加了一条直接对着真实 SDK 的契约测试钉住行为。**教训：这类 `**kwargs` 接口不能只信文档。** |
+| 7 | **Windows 排除端口段** | ✅ 已规避 | 本机保留段含 7989–8088，Docker 绑定 `0.0.0.0:8000` 被系统拒绝（报 access permissions）。宿主机端口改用可覆盖的 `HOST_PORT`，默认 9600。排查命令：`netsh interface ipv4 show excludedportrange protocol=tcp`。 |
+| 8 | **常驻标签刷爆数据库** | ✅ 已修复 | 真机联调发现，见 §7.3 与 §17。这是初版设计的真实缺陷，单测全绿也照样发生。 |
+| 9 | 读卡器断线重连（真机） | ⚠️ 未验证 | 逻辑有单测覆盖（假 SDK 驱动 `callTcpDisconnect` → 退避重连），但真实拔网线未验证。见 §17 待验证清单。 |
 
 ---
 
@@ -437,7 +506,7 @@ services:
 
 | 配置项 | 环境变量 | 默认值 | 说明 |
 |---|---|---|---|
-| 读卡器地址 | `RDR_HOST` | `192.168.1.168` | 读写器 IP |
+| 读卡器地址 | `RDR_HOST` | `192.168.0.30` | 读写器 IP（本部署实际地址） |
 | 读卡器端口 | `RDR_PORT` | `8160` | 读写器 TCP 端口 |
 | 天线 | `RDR_ANTENNA` | `1` | 使能的天线编号 |
 | 功率 | `RDR_POWER` | `30` | dBm；留空则不改设备配置 |
@@ -453,17 +522,19 @@ services:
 
 ## 15. 验收标准
 
-Demo 完成的判定条件：
+Demo 完成的判定条件（含 2026-10-16 实测结果）：
 
-1. `docker compose up` 一条命令启动，浏览器打开 `http://localhost:8000` 看到看板
-2. 拿一张已登记的学生卡在读卡器上刷，1 秒内看板出现"姓名 + 入校 + 时间"，统计数字同步 +1
-3. 同一张卡再刷一次，显示"出校"，在校人数 -1
-4. 刷一张不在名单里的卡，看板出现红色"未登记卡"告警
-5. 同一张卡在 10 秒内连刷两次，只产生一条记录；在 10–120 秒内再刷，出现黄色"重复刷卡"告警且在校人数不变
-6. 重启容器后，历史记录仍在（数据在挂载卷里）
-7. 拔掉读卡器网线，看板指示灯变红；插回后自动重连，指示灯变绿
-8. 不接读卡器时，`python tools/simulate.py` 能让整条链路跑通（用于无硬件的开发与演示兜底）
-9. `pytest` 全部通过
+| # | 验收项 | 结果 |
+|---|---|---|
+| 1 | `docker compose up` 一条命令启动，浏览器打开看板 | ✅ 通过（宿主机端口 9600，见 §12 风险 7） |
+| 2 | 刷已登记学生卡，1 秒内看板出现"姓名 + 入校 + 时间"，统计 +1 | ✅ 真机通过。6 张卡同批读到全部正确入校 |
+| 3 | 同一张卡再刷，显示"出校"，在校人数 −1 | ✅ 真机通过。卡离开范围 >120s 后再读到即翻转为出校 |
+| 4 | 刷不在名单里的卡，看板出现红色"未登记卡"告警 | ✅ 真机通过 |
+| 5 | 10 秒内连刷只产生一条记录；10–120 秒内再刷标"重复刷卡"且在校人数不变 | ✅ 通过（真机 + 单测，行为见 §7.4） |
+| 6 | 重启容器后历史记录仍在 | ✅ 通过（挂载卷生效） |
+| 7 | 拔读卡器网线指示灯变红，插回自动重连变绿 | ⚠️ **未验证**，见 §17 待验证清单 |
+| 8 | 不接读卡器时 `python tools/simulate.py` 跑通整条链路 | ✅ 通过（含容器内运行） |
+| 9 | `pytest` 全部通过 | ✅ 115 passed |
 
 ---
 
@@ -475,3 +546,39 @@ Demo 完成的判定条件：
 - 家长/班主任通知
 - 多校门、多校区组网
 - 出入热力图、周月报表
+
+---
+
+## 17. 实测记录（2026-10-16）
+
+### 环境
+
+- 读卡器：**192.168.0.30:8160**（注意：不是 SDK 示例里的 `192.168.1.168`）
+- 天线 1，功率 30dBm
+- 现场另有约 75 个样品标签常驻读取范围内（`FA2025...`、`E2806894...`、`12345678` 等）
+
+### 验证通过的部分
+
+- TCP 连接、`SetTagLog` → `SetPower` → `Inventory` 指令序列，日志可见完整收发往返
+- 读到 EPC + RSSI + 天线编号；`LogBaseEpcInfo` 字段确认为小写驼峰（`epc`/`antId`/`rssi`/`result`）
+- 6 张学生卡识别与入校记录、离开范围后再读到翻转为出校
+- 未登记卡告警
+- Docker 镜像构建、容器启动、数据跨重启保留、容器内模拟器
+- 浏览器端：渲染、统计、SSE 实时推送、历史表格、分页、姓名筛选、连接指示灯两态
+
+### 发现并修复的缺陷
+
+**写入泛滥**。初版实测约 **2400 条/分钟**，13 分钟写出 26363 条记录。根因与修复见 §7.3。
+修复后真机复测 **23 条/分钟**，降幅 104 倍；6 张学生卡全程保持「在校」状态未误翻转。
+
+值得一提：这个问题在**单测全绿的情况下照样发生** —— 因为当时的测试
+`test_unknown_card_is_not_subject_to_dedup` 恰好把这个 bug 当作预期行为锁住了。
+这个任务的教训是：单元测试只能验证"代码符合我认为的需求"，验证不了"我认为的需求是对的"。
+
+### 待验证清单
+
+| 项 | 怎么验 |
+|---|---|
+| 拔网线断线重连 | 拔掉读卡器端网线，看板指示灯应在 5 秒内变红；插回后最长 30 秒（退避上限）内自动重连变绿 |
+| 设备侧蜂鸣器 | 打开 `USE_DEVICE_BEEP=1`，确认连续盘点期间 `MsgAppSetBeep` 能否发出（见 §8.3） |
+| 真实闸机场景 | 本次测试时卡片常驻读取范围，未模拟"人持卡走过"的短时经过场景 |
