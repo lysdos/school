@@ -14,6 +14,7 @@
 
 body {
   margin: 0;
+  min-height: 100vh;
   background: var(--bg);
   color: var(--text);
   font: 14px/1.6 "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
