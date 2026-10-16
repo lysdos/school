@@ -49,6 +49,10 @@ class FakeMsgStop:
     pass
 
 
+class FakeMsgGetBaseVersion:
+    """链路存活探针用的消息。"""
+
+
 class FakeEnumG:
     AntennaNo_1 = SimpleNamespace(value=1)
     AntennaNo_2 = SimpleNamespace(value=2)
@@ -56,24 +60,34 @@ class FakeEnumG:
 
 
 class FakeClient:
-    def __init__(self, open_ok=True, inventory_rc=0):
+    """probe_rc=None 模拟「探针发了但设备没应答」，也就是链路已死。"""
+
+    def __init__(self, open_ok=True, inventory_rc=0, probe_rc=0, probe_plan=None):
         self._open_ok = open_ok
         self._inventory_rc = inventory_rc
+        self._probe_rc = probe_rc
+        self._probe_plan = list(probe_plan) if probe_plan else None
         self.callEpcInfo = None
         self.callEpcOver = None
         self.callTcpDisconnect = None
         self.opened_with = []
         self.sent = []
+        self.probe_count = 0
         self.closed = False
 
     def openTcp(self, addr):
         self.opened_with.append(addr)
         return self._open_ok
 
-    def sendSynMsg(self, msg):
+    def sendSynMsg(self, msg, timeout=3):
         self.sent.append(msg)
         if isinstance(msg, FakeMsgInventory):
             return self._inventory_rc
+        if isinstance(msg, FakeMsgGetBaseVersion):
+            self.probe_count += 1
+            if self._probe_plan:
+                return self._probe_plan.pop(0)
+            return self._probe_rc
         return 0
 
     def close(self):
@@ -85,6 +99,7 @@ class FakeSdk:
         self._clients = list(clients)
         self.created = 0
         self.EnumG = FakeEnumG
+        self.MsgAppGetBaseVersion = FakeMsgGetBaseVersion
         self.MsgBaseSetTagLog = FakeMsgSetTagLog
         self.MsgBaseSetPower = FakeMsgSetPower
         self.MsgBaseInventoryEpc = FakeMsgInventory
@@ -161,11 +176,24 @@ def test_connect_sends_config_before_inventory(cfg):
     assert rc.connected is True
     assert client.opened_with == [("192.168.1.168", 8160)]
     kinds = [type(m).__name__ for m in client.sent]
-    assert kinds == ["FakeMsgSetTagLog", "FakeMsgSetPower", "FakeMsgInventory"]
-    assert client.sent[0].repeatedTime == 50
-    assert client.sent[1].kwargs == {"1": 30}
-    assert client.sent[2].antennaEnable == 1
-    assert client.sent[2].inventoryMode == 1
+    assert kinds == ["FakeMsgStop", "FakeMsgSetTagLog", "FakeMsgSetPower",
+                     "FakeMsgInventory"]
+    assert client.sent[1].repeatedTime == 50
+    assert client.sent[2].kwargs == {"1": 30}
+    assert client.sent[3].antennaEnable == 1
+    assert client.sent[3].inventoryMode == 1
+
+
+def test_connect_stops_device_before_configuring(cfg):
+    """连接序列必须以 MsgBaseStop 开头。
+
+    设备若被上次异常断开的会话留在盘点态，新的盘点指令会被静默丢弃（真机实测），
+    重连就会一直失败。先发 Stop 把它打回空闲态。
+    """
+    client = FakeClient(open_ok=True)
+    rc = ReaderClient(cfg, queue.Queue(), sdk=FakeSdk([client]))
+    rc._try_connect()
+    assert isinstance(client.sent[0], FakeMsgStop)
 
 
 def test_set_tag_log_param_name_matches_real_sdk(cfg):
@@ -178,7 +206,8 @@ def test_set_tag_log_param_name_matches_real_sdk(cfg):
     client = FakeClient(open_ok=True)
     rc = ReaderClient(cfg, queue.Queue(), sdk=FakeSdk([client]))
     rc._try_connect()
-    assert client.sent[0].repeatedTime == cfg.rdr_repeated_time
+    tag_log = next(m for m in client.sent if isinstance(m, FakeMsgSetTagLog))
+    assert tag_log.repeatedTime == cfg.rdr_repeated_time
 
 
 def test_real_sdk_set_tag_log_transmits_repeated_time():
@@ -216,13 +245,25 @@ def test_connect_skips_power_when_not_configured(cfg):
     rc = ReaderClient(cfg_no_power, queue.Queue(), sdk=FakeSdk([client]))
     rc._try_connect()
     kinds = [type(m).__name__ for m in client.sent]
-    assert kinds == ["FakeMsgSetTagLog", "FakeMsgInventory"]
+    assert kinds == ["FakeMsgStop", "FakeMsgSetTagLog", "FakeMsgInventory"]
 
 
 def test_connect_fails_when_open_tcp_fails(cfg):
     rc = ReaderClient(cfg, queue.Queue(), sdk=FakeSdk([FakeClient(open_ok=False)]))
     assert rc._try_connect() is False
     assert rc.connected is False
+
+
+def test_failed_open_tcp_still_releases_client(cfg):
+    """openTcp 失败时也必须 close()。
+
+    SDK 的 openTcp 内部是先建 socket 再 connect，失败时不会关。
+    设备长时间断电、每 30 秒重试一次的话，socket 会一直漏。
+    """
+    client = FakeClient(open_ok=False)
+    rc = ReaderClient(cfg, queue.Queue(), sdk=FakeSdk([client]))
+    rc._try_connect()
+    assert client.closed is True
 
 
 def test_connect_fails_when_inventory_rejected(cfg):
@@ -239,7 +280,7 @@ def test_second_antenna_maps_to_correct_enum(cfg):
     rc = ReaderClient(cfg_ant2, queue.Queue(), sdk=FakeSdk([client]))
     rc._try_connect()
     assert client.sent[-1].antennaEnable == 2
-    assert client.sent[1].kwargs == {"2": 30}
+    assert client.sent[2].kwargs == {"2": 30}
 
 
 # ---------- 重连循环 ----------
@@ -277,3 +318,72 @@ def test_stop_releases_connection(cfg):
     rc.stop()
     assert client.closed is True
     assert rc.connected is False
+
+
+# ---------- Task 13 修复：主动探针（真机断电场景）----------
+# 读卡器断电时 SDK 的 callTcpDisconnect 不触发，只靠它会导致服务永远
+# 报「已连接」且永不重连。改用主动探针：盘点期间查询指令照样有应答。
+
+@pytest.fixture()
+def fast_heartbeat(monkeypatch):
+    import app.reader as reader_mod
+    monkeypatch.setattr(reader_mod, "HEARTBEAT_INTERVAL_SECONDS", 0.05)
+    monkeypatch.setattr(reader_mod, "HEARTBEAT_TIMEOUT_SECONDS", 0.05)
+
+
+def test_probe_failure_triggers_reconnect(cfg, fast_heartbeat):
+    """探针收不到应答 = 链路已死 → 必须放弃这条连接并重连。"""
+    dead = FakeClient(open_ok=True, probe_rc=None)   # 永不应答，模拟断电
+    alive = FakeClient(open_ok=True, probe_rc=0)
+    sdk = FakeSdk([dead, alive])
+
+    rc = ReaderClient(cfg, queue.Queue(), sdk=sdk, sleep=lambda _s: None)
+    rc.start()
+    try:
+        assert _wait_until(lambda: sdk.created == 2 and rc.connected, timeout=5)
+        assert dead.closed is True, "死连接必须被关闭，否则 SDK 的忙等线程不会停"
+    finally:
+        rc.stop()
+
+
+def test_probe_success_keeps_connection(cfg, fast_heartbeat):
+    """探针有应答就不该重连，也不能自己断开。"""
+    client = FakeClient(open_ok=True, probe_rc=0)
+    sdk = FakeSdk([client])
+    rc = ReaderClient(cfg, queue.Queue(), sdk=sdk, sleep=lambda _s: None)
+    rc.start()
+    try:
+        assert _wait_until(lambda: rc.connected)
+        assert _wait_until(lambda: client.probe_count >= 3, timeout=5)
+        assert sdk.created == 1
+        assert rc.connected is True
+        assert client.closed is False
+    finally:
+        rc.stop()
+
+
+def test_single_probe_failure_does_not_disconnect(cfg, fast_heartbeat):
+    """偶发丢包不该导致连接抖动：要连续失败两次才判死。"""
+    client = FakeClient(open_ok=True, probe_plan=[None, 0] + [0] * 20)
+    sdk = FakeSdk([client])
+    rc = ReaderClient(cfg, queue.Queue(), sdk=sdk, sleep=lambda _s: None)
+    rc.start()
+    try:
+        assert _wait_until(lambda: rc.connected)
+        assert _wait_until(lambda: client.probe_count >= 5, timeout=5)
+        assert sdk.created == 1
+        assert rc.connected is True
+    finally:
+        rc.stop()
+
+
+def test_two_consecutive_probe_failures_disconnect(cfg, fast_heartbeat):
+    """连续两次失败才判死 —— 把边界钉住。"""
+    client = FakeClient(open_ok=True, probe_plan=[None, None] + [0] * 20)
+    sdk = FakeSdk([client, FakeClient(open_ok=True, probe_rc=0)])
+    rc = ReaderClient(cfg, queue.Queue(), sdk=sdk, sleep=lambda _s: None)
+    rc.start()
+    try:
+        assert _wait_until(lambda: sdk.created == 2, timeout=5)
+    finally:
+        rc.stop()
