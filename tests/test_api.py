@@ -125,6 +125,16 @@ def test_simulate_requires_epc(client):
     assert client.post("/api/simulate").status_code == 422
 
 
+def test_swipes_registered_only_filters_unknown_cards(client):
+    client.post("/api/simulate", params={"epc": EPC_LI})
+    client.post("/api/simulate", params={"epc": EPC_UNKNOWN})
+
+    assert client.get("/api/swipes").json()["total"] == 2
+    body = client.get("/api/swipes", params={"registered_only": True}).json()
+    assert body["total"] == 1
+    assert body["items"][0]["name"] == "李弘毅"
+
+
 def test_simulate_publishes_event_to_bus(tmp_path):
     """刷卡结果必须推给事件总线，否则看板不会实时刷新。"""
     cfg = _cfg(tmp_path)

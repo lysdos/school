@@ -173,10 +173,11 @@ class Database:
             new_id = cur.lastrowid
         return SwipeEvent(**{**event.__dict__, "id": new_id})
 
-    def _swipe_where(self, name, student_no, date) -> tuple[str, list]:
+    def _swipe_where(self, name, student_no, date,
+                     registered_only: bool = False) -> tuple[str, list]:
         """拼 WHERE 子句。
 
-        SQL 片段只从下面这三个固定模板里选，不拼接任何外部输入；
+        SQL 片段只从下面这几个固定模板里选，不拼接任何外部输入；
         所有用户提供的值都走 params 绑定，因此下面的 f-string 是安全的。
         """
         clauses: list[str] = []
@@ -190,12 +191,16 @@ class Database:
         if date:
             clauses.append("swiped_at LIKE ?")
             params.append(f"{date}%")
+        if registered_only:
+            # 未登记卡不参与历史展示；它们仍在库里（审计与告警要用），只是查不到
+            clauses.append("name IS NOT NULL")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         return where, params
 
     def list_swipes(self, name=None, student_no=None, date=None,
-                    page: int = 1, size: int = 20) -> list[SwipeEvent]:
-        where, params = self._swipe_where(name, student_no, date)
+                    page: int = 1, size: int = 20,
+                    registered_only: bool = False) -> list[SwipeEvent]:
+        where, params = self._swipe_where(name, student_no, date, registered_only)
         offset = max(page - 1, 0) * size
         with self._lock:
             rows = self._conn.execute(
@@ -205,8 +210,9 @@ class Database:
             ).fetchall()
         return [_row_to_swipe(r) for r in rows]
 
-    def count_swipes(self, name=None, student_no=None, date=None) -> int:
-        where, params = self._swipe_where(name, student_no, date)
+    def count_swipes(self, name=None, student_no=None, date=None,
+                     registered_only: bool = False) -> int:
+        where, params = self._swipe_where(name, student_no, date, registered_only)
         with self._lock:
             row = self._conn.execute(
                 f"SELECT COUNT(*) AS n FROM swipes {where}", tuple(params)

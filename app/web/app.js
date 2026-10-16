@@ -101,7 +101,10 @@ async function pollHealth() {
 async function loadHistory() {
   const name = document.getElementById('q-name').value.trim();
   const date = document.getElementById('q-date').value;
-  const params = new URLSearchParams({ page: state.page, size: state.size });
+  // 历史记录只看已登记学生；未登记卡仍入库（告警要用），只是不在这里展示
+  const params = new URLSearchParams({
+    page: state.page, size: state.size, registered_only: 'true',
+  });
   if (name) params.set('name', name);
   if (date) params.set('date', date);
 

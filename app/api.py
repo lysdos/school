@@ -66,12 +66,15 @@ def create_app(cfg: Config, db: Database, service: SwipeService,
     def swipes(name: str | None = None,
                student_no: str | None = None,
                date: str | None = None,
+               registered_only: bool = False,
                page: int = Query(1, ge=1),
                size: int = Query(20, ge=1, le=200)) -> dict:
         rows = db.list_swipes(name=name, student_no=student_no, date=date,
-                              page=page, size=size)
+                              page=page, size=size,
+                              registered_only=registered_only)
         return {
-            "total": db.count_swipes(name=name, student_no=student_no, date=date),
+            "total": db.count_swipes(name=name, student_no=student_no, date=date,
+                                     registered_only=registered_only),
             "page": page,
             "size": size,
             "items": [swipe_to_dict(e) for e in rows],

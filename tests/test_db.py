@@ -106,6 +106,39 @@ def test_list_swipes_pagination(db):
     assert db.count_swipes() == 5
 
 
+def test_list_swipes_registered_only_excludes_unknown_cards(db):
+    db.insert_swipe(_event(name="李弘毅"))
+    db.insert_swipe(_event(epc="FFFFFFFF", student_no=None, name=None,
+                           direction=Direction.UNKNOWN,
+                           status=SwipeStatus.UNKNOWN_CARD))
+
+    assert len(db.list_swipes()) == 2                    # 默认不过滤
+    rows = db.list_swipes(registered_only=True)
+    assert len(rows) == 1
+    assert rows[0].name == "李弘毅"
+    assert db.count_swipes(registered_only=True) == 1
+    assert db.count_swipes() == 2
+
+
+def test_registered_only_still_applies_other_filters(db):
+    db.insert_swipe(_event(name="李弘毅"))
+    db.insert_swipe(_event(name="单钰辰", student_no="1213311379", epc="B2"))
+    db.insert_swipe(_event(epc="FFFFFFFF", name=None, student_no=None,
+                           status=SwipeStatus.UNKNOWN_CARD,
+                           direction=Direction.UNKNOWN))
+
+    assert db.count_swipes(name="李弘毅", registered_only=True) == 1
+    assert db.count_swipes(name="单钰辰", registered_only=True) == 1
+    assert db.count_swipes(name="王五", registered_only=True) == 0
+
+
+def test_registered_only_includes_duplicate_records(db):
+    """重复刷卡是已登记学生的记录，应保留。"""
+    db.insert_swipe(_event(name="李弘毅", status=SwipeStatus.DUPLICATE,
+                           direction=Direction.OUT))
+    assert db.count_swipes(registered_only=True) == 1
+
+
 def test_today_stats(db):
     db.upsert_student("A1", "1001", "张三", "2026-10-15T00:00:00")
     db.upsert_student("A2", "1002", "李四", "2026-10-15T00:00:00")
