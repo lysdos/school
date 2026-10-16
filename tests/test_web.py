@@ -23,7 +23,7 @@ def client(tmp_path):
         rdr_host="192.168.1.168", rdr_port=8160, rdr_antenna=1, rdr_power=30,
         rdr_repeated_time=50, dedup_window=10.0, duplicate_window=120.0,
         roster_file=tmp_path / "r.xlsx", db_path=tmp_path / "campus.db",
-        use_device_beep=False, http_host="0.0.0.0", http_port=8000,
+        use_device_beep=False, http_port=8000,
     )
     db = Database(cfg.db_path)
     app = create_app(cfg, db, SwipeService(db), type("R", (), {"connected": True})(),

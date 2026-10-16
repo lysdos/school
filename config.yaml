@@ -1,4 +1,4 @@
-rdr_host: "192.168.1.168"
+rdr_host: "192.168.0.30"
 rdr_port: 8160
 rdr_antenna: 1
 rdr_power: 30
@@ -8,5 +8,8 @@ duplicate_window: 120
 roster_file: "data/学生记录.xlsx"
 db_path: "data/campus.db"
 use_device_beep: false
-http_host: "0.0.0.0"
-http_port: 8000
+
+# 看板自己的地址，仅供 tools/simulate.py 拼默认请求地址。
+# 实际监听端口由 uvicorn 命令行决定（Dockerfile 里是容器内的 8000，
+# 宿主机通过 HOST_PORT 映射，默认 9600）。
+http_port: 9600

@@ -71,19 +71,32 @@ def _direct(db: Database, service: SwipeService, epc: str) -> dict:
     }
 
 
+def _print_roster(db: Database) -> None:
+    for s in db.list_students():
+        print(f"{s.epc}  {s.student_no}  {s.name}  "
+              f"{'在校' if s.in_campus else '离校'}")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     cfg = load_config(DEFAULT_CONFIG)
-    db = Database(cfg.db_path)
 
+    if args.list:
+        db = Database(cfg.db_path)
+        try:
+            _print_roster(db)
+        finally:
+            db.close()
+        return 0
+
+    # HTTP 模式 + 指定 --epc 时本地不需要数据库（只有随机挑学生才要读名单）。
+    # 顺手避开一个真实的坑：容器和宿主机同时打开同一个 SQLite 文件时，
+    # Docker Desktop 的 bind mount 处理不好锁，容器会报 disk I/O error。
+    needs_db = args.direct or args.epc is None
+    db = Database(cfg.db_path) if needs_db else None
     try:
-        if args.list:
-            for s in db.list_students():
-                print(f"{s.epc}  {s.student_no}  {s.name}  "
-                      f"{'在校' if s.in_campus else '离校'}")
-            return 0
-
-        service = SwipeService(db, cfg.dedup_window, cfg.duplicate_window)
+        service = (SwipeService(db, cfg.dedup_window, cfg.duplicate_window)
+                   if args.direct else None)
         base_url = args.base_url or f"http://127.0.0.1:{cfg.http_port}"
 
         for i in range(args.count):
@@ -110,7 +123,8 @@ def main(argv: list[str] | None = None) -> int:
                 time.sleep(args.delay)
         return 0
     finally:
-        db.close()
+        if db is not None:
+            db.close()
 
 
 if __name__ == "__main__":

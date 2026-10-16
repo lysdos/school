@@ -12,7 +12,7 @@ services:
       - ./data:/app/data
     environment:
       TZ: Asia/Shanghai
-      RDR_HOST: "192.168.1.168"
+      RDR_HOST: "192.168.0.30"
       RDR_PORT: "8160"
       RDR_ANTENNA: "1"
       RDR_POWER: "30"
@@ -20,4 +20,7 @@ services:
       DEDUP_WINDOW: "10"
       DUPLICATE_WINDOW: "120"
       USE_DEVICE_BEEP: "0"
+      # simulate.py 拼默认请求地址用。容器内 uvicorn 监听的是 8000，
+      # 不是宿主机映射的 9600 —— 在容器里跑 simulate.py 时用这个值才对。
+      HTTP_PORT: "8000"
     restart: unless-stopped

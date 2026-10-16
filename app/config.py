@@ -22,7 +22,9 @@ class Config:
     roster_file: Path
     db_path: Path
     use_device_beep: bool
-    http_host: str
+    # 看板自己的地址。只用于 tools/simulate.py 拼默认请求地址 ——
+    # 真正的监听端口由 uvicorn 命令行给（Dockerfile 里固定 8000）。
+    # 在容器里跑 simulate.py 时，这个值应当是容器内部的端口，不是宿主机映射的端口。
     http_port: int
 
 
@@ -37,7 +39,6 @@ DEFAULTS: dict[str, object] = {
     "roster_file": "data/学生记录.xlsx",
     "db_path": "data/campus.db",
     "use_device_beep": False,
-    "http_host": "0.0.0.0",
     "http_port": 8000,
 }
 
@@ -52,7 +53,6 @@ ENV_MAP: dict[str, str] = {
     "roster_file": "ROSTER_FILE",
     "db_path": "DB_PATH",
     "use_device_beep": "USE_DEVICE_BEEP",
-    "http_host": "HTTP_HOST",
     "http_port": "HTTP_PORT",
 }
 

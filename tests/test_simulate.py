@@ -49,3 +49,59 @@ def test_parser_reads_epc_and_count():
     assert args.epc == "AABB"
     assert args.count == 3
     assert args.delay == 0.5
+
+
+def test_http_mode_with_explicit_epc_does_not_open_db(monkeypatch):
+    """指定 --epc 走 HTTP 时不该碰本地数据库。
+
+    否则会踩到「容器和宿主机同时打开同一个 SQLite 文件」这个坑 ——
+    Docker Desktop 的 bind mount 处理不好锁，容器会报 disk I/O error。
+    """
+    import simulate
+
+    opened = []
+
+    class SpyDb:
+        def __init__(self, path):
+            opened.append(path)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(simulate, "Database", SpyDb)
+    monkeypatch.setattr(simulate, "_post", lambda url, epc: {
+        "accepted": True,
+        "event": {"name": "李弘毅", "direction": "in", "status": "ok",
+                  "swiped_at": "2026-10-15T08:00:00"},
+    })
+
+    assert simulate.main(["--epc", "AABB"]) == 0
+    assert opened == []
+
+
+def test_http_mode_without_epc_opens_db_to_pick_student(monkeypatch):
+    """不指定 --epc 时要读名单来随机挑人，这时必须开库。"""
+    import simulate
+
+    opened = []
+
+    class SpyDb:
+        def __init__(self, path):
+            opened.append(path)
+
+        def list_students(self):
+            from app.models import Student
+            return [Student(epc="AABB", student_no="1001", name="张三")]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(simulate, "Database", SpyDb)
+    monkeypatch.setattr(simulate, "_post", lambda url, epc: {
+        "accepted": True,
+        "event": {"name": "张三", "direction": "in", "status": "ok",
+                  "swiped_at": "2026-10-15T08:00:00"},
+    })
+
+    assert simulate.main([]) == 0
+    assert len(opened) == 1

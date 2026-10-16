@@ -76,6 +76,11 @@ python tools/simulate.py --direct        # 绕过 HTTP，直接读写数据库
 - **`repeatedTime` 参数名是小写**：SDK 的 PDF 文档写作 `RepeatedTime`，但实现是
   `kwargs.get("repeatedTime")`。写错不会报错，只会让设备侧去重静默失效。
   `tests/test_reader.py` 里有一条直接对着真实 SDK 的契约测试钉住这个行为。
+- **别让本地进程和容器同时用同一个 `data/`**：两个进程同时打开同一个 SQLite 文件时，
+  Docker Desktop 的 bind mount 处理不好锁，容器会报 `sqlite3.OperationalError: disk I/O error`。
+  要么只用容器，要么只用本地。用容器时想模拟刷卡就这样跑：
+  `docker compose exec campus python tools/simulate.py`。
+  （`--epc` 指定卡号的 HTTP 模式已经改成不碰本地数据库，但 `--direct` 和随机挑人仍需要。）
 
 ## 目录结构
 
