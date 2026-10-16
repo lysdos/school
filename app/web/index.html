@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>校园出入看板</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>校园出入看板</h1>
+  <div class="conn">
+    <span id="conn-dot" class="dot dot-unknown"></span>
+    <span id="conn-text">连接中…</span>
+    <button id="beep-toggle" class="btn" type="button">开启提示音</button>
+  </div>
+</header>
+
+<section class="stats">
+  <div class="card"><div class="num" id="stat-in">0</div><div class="label">今日进校</div></div>
+  <div class="card"><div class="num" id="stat-out">0</div><div class="label">今日出校</div></div>
+  <div class="card"><div class="num" id="stat-incampus">0</div><div class="label">当前在校</div></div>
+  <div class="card"><div class="num" id="stat-total">0</div><div class="label">学生总数</div></div>
+</section>
+
+<main class="panels">
+  <section class="panel">
+    <h2>实时刷卡</h2>
+    <ul id="live" class="live"><li class="empty">等待刷卡…</li></ul>
+  </section>
+
+  <section class="panel">
+    <h2>历史记录查询</h2>
+    <form id="query" class="query">
+      <input id="q-name" placeholder="姓名" autocomplete="off">
+      <input id="q-date" type="date">
+      <button type="submit" class="btn">查询</button>
+      <button type="button" id="q-reset" class="btn btn-ghost">重置</button>
+    </form>
+    <table class="history">
+      <thead><tr><th>时间</th><th>姓名</th><th>学号</th><th>方向</th></tr></thead>
+      <tbody id="history"></tbody>
+    </table>
+    <div class="pager">
+      <button id="prev" class="btn btn-ghost" type="button">上一页</button>
+      <span id="page-info">第 1 页</span>
+      <button id="next" class="btn btn-ghost" type="button">下一页</button>
+    </div>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>
