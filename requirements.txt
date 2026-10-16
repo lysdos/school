@@ -1,0 +1,5 @@
+uhfReaderApi-Cykeo==1.0.9
+fastapi
+uvicorn[standard]
+openpyxl
+PyYAML
