@@ -110,3 +110,75 @@ def test_swiped_at_uses_local_isoformat(service):
 def test_reader_addr_is_recorded(service):
     event = service.process(_tag(), _at("2026-10-15T08:23:11"))
     assert event.reader_addr == "192.168.1.168:8160"
+
+
+# ---------- Task 5: 两级去重窗口 ----------
+
+def test_swipe_within_dedup_window_is_silently_dropped(service, db):
+    service.process(_tag(), _at("2026-10-15T08:23:11"))
+    result = service.process(_tag(), _at("2026-10-15T08:23:19"))  # +8s
+    assert result is None
+    assert db.count_swipes() == 1
+    assert db.get_student(EPC_LI).in_campus is True  # 状态未被翻转
+
+
+def test_swipe_exactly_at_dedup_window_is_not_dropped(service):
+    service.process(_tag(), _at("2026-10-15T08:23:11"))
+    result = service.process(_tag(), _at("2026-10-15T08:23:21"))  # 恰好 +10s
+    assert result is not None
+    assert result.status is SwipeStatus.DUPLICATE
+
+
+def test_swipe_in_duplicate_window_is_flagged_and_not_toggled(service, db):
+    service.process(_tag(), _at("2026-10-15T08:23:11"))          # 进校
+    result = service.process(_tag(), _at("2026-10-15T08:23:41"))  # +30s
+    assert result is not None
+    assert result.status is SwipeStatus.DUPLICATE
+    assert result.direction is Direction.OUT  # 按当时状态推算的方向
+    assert db.get_student(EPC_LI).in_campus is True  # 未翻转
+
+
+def test_duplicate_refreshes_last_swipe_at(service, db):
+    service.process(_tag(), _at("2026-10-15T08:23:11"))
+    service.process(_tag(), _at("2026-10-15T08:23:41"))
+    assert db.get_student(EPC_LI).last_swipe_at == "2026-10-15T08:23:41"
+
+
+def test_lingering_student_never_flips(service, db):
+    """学生在闸机前逗留 5 分钟，每 30 秒被读到一次，状态应始终为「在校」。
+
+    每轮都要断言，不能只看最终状态：若实现误翻转，偶数次迭代后状态会绕回原值，
+    只在结尾断言会让这个 bug 蒙混过关（变异测试实测发现过这个问题）。
+    """
+    t = _at("2026-10-15T08:00:00")
+    service.process(_tag(), t)
+    assert db.get_student(EPC_LI).in_campus is True
+    for i in range(1, 11):
+        service.process(_tag(), t + timedelta(seconds=30 * i))
+        assert db.get_student(EPC_LI).in_campus is True, f"第 {i} 次逗留刷卡后状态被翻转"
+    # 10 次逗留刷卡全部标记为重复
+    assert db.count_swipes(date="2026-10-15") == 11
+    assert all(e.status is SwipeStatus.DUPLICATE for e in db.list_swipes(size=100)[:-1])
+
+
+def test_swipe_after_duplicate_window_toggles_normally(service, db):
+    service.process(_tag(), _at("2026-10-15T08:23:11"))          # 进校
+    result = service.process(_tag(), _at("2026-10-15T08:25:12"))  # +121s
+    assert result.status is SwipeStatus.OK
+    assert result.direction is Direction.OUT
+    assert db.get_student(EPC_LI).in_campus is False
+
+
+def test_dedup_window_is_per_student(service, db):
+    db.upsert_student("BBBB", "1213311379", "单钰辰", "2026-10-15T00:00:00")
+    service.process(_tag(), _at("2026-10-15T08:23:11"))
+    other = service.process(_tag(epc="BBBB"), _at("2026-10-15T08:23:12"))
+    assert other is not None
+    assert other.status is SwipeStatus.OK
+
+
+def test_unknown_card_is_not_subject_to_dedup(service, db):
+    service.process(_tag(EPC_UNKNOWN), _at("2026-10-15T08:23:11"))
+    again = service.process(_tag(EPC_UNKNOWN), _at("2026-10-15T08:23:12"))
+    assert again is not None
+    assert again.status is SwipeStatus.UNKNOWN_CARD
