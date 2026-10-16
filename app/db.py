@@ -11,13 +11,14 @@ from .models import Direction, Student, SwipeEvent, SwipeStatus
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS students (
-    epc           TEXT PRIMARY KEY,
-    student_no    TEXT NOT NULL,
-    name          TEXT NOT NULL,
-    in_campus     INTEGER NOT NULL DEFAULT 0,
-    last_swipe_at TEXT,
-    state_date    TEXT,
-    created_at    TEXT NOT NULL
+    epc            TEXT PRIMARY KEY,
+    student_no     TEXT NOT NULL,
+    name           TEXT NOT NULL,
+    in_campus      INTEGER NOT NULL DEFAULT 0,
+    last_swipe_at  TEXT,
+    last_logged_at TEXT,
+    state_date     TEXT,
+    created_at     TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS swipes (
@@ -52,6 +53,7 @@ def _row_to_student(row: sqlite3.Row) -> Student:
         name=row["name"],
         in_campus=bool(row["in_campus"]),
         last_swipe_at=row["last_swipe_at"],
+        last_logged_at=row["last_logged_at"],
         state_date=row["state_date"],
     )
 
@@ -80,7 +82,14 @@ class Database:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """给早于写入节流修复的库补列。CREATE TABLE IF NOT EXISTS 不会改已存在的表。"""
+        columns = {r["name"] for r in self._conn.execute("PRAGMA table_info(students)")}
+        if "last_logged_at" not in columns:
+            self._conn.execute("ALTER TABLE students ADD COLUMN last_logged_at TEXT")
 
     def close(self) -> None:
         with self._lock:
@@ -118,16 +127,26 @@ class Database:
         return [_row_to_student(r) for r in rows]
 
     def set_student_state(
-        self, epc: str, in_campus: bool, last_swipe_at: str, state_date: str
+        self, epc: str, in_campus: bool, last_swipe_at: str, state_date: str,
+        last_logged_at: str | None = None,
     ) -> None:
+        """更新学生状态。
+
+        last_logged_at 传 None 表示「本次没有写库」，此时保留原值 ——
+        否则每次读到标签都会把节流窗口重置，常驻标签又会无限写库。
+        """
         with self._lock:
             self._conn.execute(
                 """
                 UPDATE students
-                   SET in_campus = ?, last_swipe_at = ?, state_date = ?
+                   SET in_campus      = ?,
+                       last_swipe_at  = ?,
+                       state_date     = ?,
+                       last_logged_at = COALESCE(?, last_logged_at)
                  WHERE epc = ?
                 """,
-                (1 if in_campus else 0, last_swipe_at, state_date, epc),
+                (1 if in_campus else 0, last_swipe_at, state_date,
+                 last_logged_at, epc),
             )
             self._conn.commit()
 

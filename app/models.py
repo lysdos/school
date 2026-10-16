@@ -24,7 +24,11 @@ class Student:
     student_no: str
     name: str
     in_campus: bool = False
+    # 状态锚点：每次有效读到就刷新。保证学生在读卡范围内逗留时「在校」状态不来回翻。
     last_swipe_at: str | None = None
+    # 写入节流：只在真正写库时刷新。限制同一张卡写库的频率。
+    # 两者必须分开 —— 合并成一个字段会让常驻标签无限写库（真机实测 2400 条/分钟）。
+    last_logged_at: str | None = None
     state_date: str | None = None
 
 
