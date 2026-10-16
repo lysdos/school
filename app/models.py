@@ -58,3 +58,29 @@ class SwipeEvent:
 def normalize_epc(epc: str) -> str:
     """EPC 一律转大写后比对，避免读写器上报与名单大小写不一致导致匹配失败。"""
     return str(epc).strip().upper()
+
+
+def swipe_to_dict(event: SwipeEvent) -> dict:
+    """API 与 SSE 共用的序列化。枚举转成字符串值。"""
+    return {
+        "id": event.id,
+        "epc": event.epc,
+        "student_no": event.student_no,
+        "name": event.name,
+        "direction": event.direction.value,
+        "status": event.status.value,
+        "rssi": event.rssi,
+        "ant_id": event.ant_id,
+        "reader_addr": event.reader_addr,
+        "swiped_at": event.swiped_at,
+    }
+
+
+def student_to_dict(student: Student) -> dict:
+    return {
+        "epc": student.epc,
+        "student_no": student.student_no,
+        "name": student.name,
+        "in_campus": student.in_campus,
+        "last_swipe_at": student.last_swipe_at,
+    }
