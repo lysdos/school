@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import queue
+import threading
 from datetime import datetime
+from typing import Callable
 
 from .db import Database
 from .models import (
@@ -83,3 +86,45 @@ class SwipeService:
             epc, in_campus if is_duplicate else not in_campus, now_iso, today
         )
         return saved
+
+
+class SwipeConsumer:
+    """从队列取 RawTagEvent、跑业务逻辑、把非 None 的结果交给 on_event。
+
+    单条事件处理失败不能杀死线程 —— 否则一次脏数据就会让整个看板停止更新。
+    """
+
+    def __init__(self, service: SwipeService,
+                 in_queue: "queue.Queue[RawTagEvent]",
+                 on_event: Callable[[SwipeEvent], None],
+                 poll_timeout: float = 0.5,
+                 clock: Callable[[], datetime] = datetime.now):
+        self._service = service
+        self._in = in_queue
+        self._on_event = on_event
+        self._poll_timeout = poll_timeout
+        self._clock = clock
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run, name="swipe-consumer", daemon=True
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self, timeout: float = 5.0) -> None:
+        self._stop.set()
+        self._thread.join(timeout=timeout)
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                tag = self._in.get(timeout=self._poll_timeout)
+            except queue.Empty:
+                continue
+            try:
+                event = self._service.process(tag, self._clock())
+            except Exception:
+                continue
+            if event is not None:
+                self._on_event(event)

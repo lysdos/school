@@ -1,3 +1,5 @@
+import queue
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -5,7 +7,7 @@ import pytest
 
 from app.db import Database
 from app.models import Direction, RawTagEvent, SwipeStatus
-from app.service import SwipeService, decide_direction
+from app.service import SwipeConsumer, SwipeService, decide_direction
 
 EPC_LI = "E28011B0A50500756E79A1C9"
 EPC_UNKNOWN = "FFFFFFFFFFFFFFFF"
@@ -182,3 +184,68 @@ def test_unknown_card_is_not_subject_to_dedup(service, db):
     again = service.process(_tag(EPC_UNKNOWN), _at("2026-10-15T08:23:12"))
     assert again is not None
     assert again.status is SwipeStatus.UNKNOWN_CARD
+
+
+# ---------- Task 7: 消费线程 ----------
+
+def _wait_until(predicate, timeout=5.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def test_consumer_delivers_processed_events(db):
+    service = SwipeService(db, 10.0, 120.0)
+    tag_queue: queue.Queue = queue.Queue()
+    seen = []
+    consumer = SwipeConsumer(service, tag_queue, seen.append, poll_timeout=0.05)
+    consumer.start()
+    try:
+        tag_queue.put(_tag())
+        assert _wait_until(lambda: len(seen) == 1)
+        assert seen[0].name == "李弘毅"
+    finally:
+        consumer.stop()
+
+
+def test_consumer_drops_deduped_events(db):
+    service = SwipeService(db, 10.0, 120.0)
+    tag_queue: queue.Queue = queue.Queue()
+    seen = []
+    consumer = SwipeConsumer(service, tag_queue, seen.append, poll_timeout=0.05)
+    consumer.start()
+    try:
+        tag_queue.put(_tag())
+        assert _wait_until(lambda: len(seen) == 1)
+        tag_queue.put(_tag())          # 去重窗口内 → process 返回 None
+        time.sleep(0.3)
+        assert len(seen) == 1
+    finally:
+        consumer.stop()
+
+
+def test_consumer_survives_service_exception(db):
+    class Boom:
+        def process(self, tag, now):
+            raise RuntimeError("boom")
+
+    tag_queue: queue.Queue = queue.Queue()
+    consumer = SwipeConsumer(Boom(), tag_queue, lambda _e: None, poll_timeout=0.05)
+    consumer.start()
+    try:
+        tag_queue.put(_tag())
+        time.sleep(0.2)
+        assert consumer._thread.is_alive()
+    finally:
+        consumer.stop()
+
+
+def test_consumer_stop_joins_thread(db):
+    service = SwipeService(db, 10.0, 120.0)
+    consumer = SwipeConsumer(service, queue.Queue(), lambda _e: None, poll_timeout=0.05)
+    consumer.start()
+    consumer.stop()
+    assert not consumer._thread.is_alive()
