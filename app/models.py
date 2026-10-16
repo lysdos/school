@@ -53,3 +53,8 @@ class SwipeEvent:
     ant_id: int | None
     reader_addr: str
     swiped_at: str
+
+
+def normalize_epc(epc: str) -> str:
+    """EPC 一律转大写后比对，避免读写器上报与名单大小写不一致导致匹配失败。"""
+    return str(epc).strip().upper()
