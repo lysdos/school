@@ -22,8 +22,16 @@ def cfg():
 # ---------- 假 SDK ----------
 
 class FakeMsgSetTagLog:
-    def __init__(self, RepeatedTime=None):
-        self.RepeatedTime = RepeatedTime
+    """镜像真实 SDK 的取值方式，而不是照抄文档里的参数名。
+
+    真实实现（uhf.reader.MsgBaseSetTagLog.__init__）：
+        self.repeatedTime = kwargs.get("repeatedTime", None)
+    因为是 **kwargs，传错大小写不会报错，只会静默失效。这个假类必须复刻这个行为，
+    否则测试永远抓不到参数名写错。
+    """
+
+    def __init__(self, **kwargs):
+        self.repeatedTime = kwargs.get("repeatedTime", None)
 
 
 class FakeMsgSetPower:
@@ -154,10 +162,43 @@ def test_connect_sends_config_before_inventory(cfg):
     assert client.opened_with == [("192.168.1.168", 8160)]
     kinds = [type(m).__name__ for m in client.sent]
     assert kinds == ["FakeMsgSetTagLog", "FakeMsgSetPower", "FakeMsgInventory"]
-    assert client.sent[0].RepeatedTime == 50
+    assert client.sent[0].repeatedTime == 50
     assert client.sent[1].kwargs == {"1": 30}
     assert client.sent[2].antennaEnable == 1
     assert client.sent[2].inventoryMode == 1
+
+
+def test_set_tag_log_param_name_matches_real_sdk(cfg):
+    """回归测试：参数名必须是小写 repeatedTime。
+
+    真实 SDK 用 kwargs.get("repeatedTime") 取值，PDF 文档却写 RepeatedTime。
+    传大写会被静默忽略 → pack() 跳过该字段 → 设备侧去重失效，
+    而且不会有任何报错，只有上真机才能发现。
+    """
+    client = FakeClient(open_ok=True)
+    rc = ReaderClient(cfg, queue.Queue(), sdk=FakeSdk([client]))
+    rc._try_connect()
+    assert client.sent[0].repeatedTime == cfg.rdr_repeated_time
+
+
+def test_real_sdk_set_tag_log_transmits_repeated_time():
+    """直接对着真实 SDK 钉住参数名行为（SDK 未安装时跳过）。
+
+    这条测试同时是文档：说明为什么 reader.py 里必须写小写 repeatedTime。
+    """
+    uhf = pytest.importorskip("uhf.reader")
+
+    good = uhf.MsgBaseSetTagLog(repeatedTime=50)
+    good.pack()
+    assert good.repeatedTime == 50
+    assert good.dataLen > 0, "小写 repeatedTime 应被编码进报文"
+
+    bad = uhf.MsgBaseSetTagLog(RepeatedTime=50)   # PDF 文档里的写法
+    bad.pack()
+    assert bad.repeatedTime is None
+    assert bad.dataLen == 0, (
+        "大写 RepeatedTime 被 **kwargs 静默忽略、报文为空，设备侧去重不会生效"
+    )
 
 
 def test_connect_registers_callbacks(cfg):

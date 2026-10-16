@@ -129,9 +129,13 @@ class ReaderClient:
             client.callTcpDisconnect = self._on_disconnect
             self._client = client
 
-            # 配置消息必须在设备空闲态发送，因此先于 Inventory
+            # 配置消息必须在设备空闲态发送，因此先于 Inventory。
+            # 参数名必须是小写 repeatedTime：真实 SDK 的实现是
+            #   self.repeatedTime = kwargs.get("repeatedTime", None)
+            # 而 PDF 文档写的是 RepeatedTime。传大写会被 **kwargs 静默吞掉，
+            # pack() 跳过该字段，设备侧去重完全不生效。
             client.sendSynMsg(sdk.MsgBaseSetTagLog(
-                RepeatedTime=self._cfg.rdr_repeated_time
+                repeatedTime=self._cfg.rdr_repeated_time
             ))
             if self._cfg.rdr_power is not None:
                 client.sendSynMsg(sdk.MsgBaseSetPower(
