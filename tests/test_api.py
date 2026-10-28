@@ -24,6 +24,9 @@ def _cfg(tmp_path: Path) -> Config:
         rdr_repeated_time=50, dedup_window=10.0, duplicate_window=120.0,
         roster_file=tmp_path / "学生记录.xlsx", db_path=tmp_path / "campus.db",
         use_device_beep=False, http_port=8000,
+        upload_enabled=False, upload_url="", upload_token="",
+        upload_timeout=5.0, upload_interval=15.0, upload_batch_size=50,
+        admin_password="",
     )
 
 
@@ -67,6 +70,7 @@ def test_students_endpoint(client):
     assert len(rows) == 1
     assert rows[0] == {
         "epc": EPC_LI, "student_no": "1424764951", "name": "李弘毅",
+        "class_name": None,
         "in_campus": False, "last_swipe_at": None,
     }
 

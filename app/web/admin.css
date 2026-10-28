@@ -1,0 +1,313 @@
+/* ---------- 后台管理专用样式，基础色板继承 style.css ---------- */
+
+/* `hidden` 是 HTML 全局属性，但它只相当于 `display: none` 的 UA 样式，
+ * 任何 author 侧的 `display` 声明都能把它盖掉。
+ * 本文件里 `.login-wrap` / `.modal` 都显式写了 display，
+ * 于是 `hidden` 失效，登录框上面盖了一层看不见但挡点击的弹窗遮罩。
+ * 这条兜底规则必须放在最前面，且要 !important 才压得住后面的 display。 */
+[hidden] { display: none !important; }
+
+.admin-body { background: var(--panel-alt); }
+
+.muted { color: var(--muted); font-size: 13px; }
+.pad { padding: 16px 4px; }
+.err { color: var(--error); font-size: 13px; margin: 8px 0 0; }
+
+/* ---------- 登录 ---------- */
+
+.login-wrap {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 340px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 28px 24px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.login-card h1 {
+  margin: 0;
+  font-size: 19px;
+  color: var(--heading);
+  text-align: center;
+}
+
+.login-card p { margin: 0; text-align: center; }
+
+.login-card input {
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 9px 12px;
+  font-size: 14px;
+}
+
+.login-card input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(26, 95, 208, .14);
+}
+
+.btn-block { width: 100%; padding: 9px 0; }
+
+.back-link {
+  color: var(--muted);
+  font-size: 13px;
+  text-decoration: none;
+  text-align: center;
+}
+.back-link:hover { color: var(--accent); }
+
+/* ---------- 顶栏 + 页签 ---------- */
+
+.topbar { padding: 12px 24px; }
+
+.tabs { display: flex; gap: 4px; }
+
+.tab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  padding: 7px 14px;
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 6px 6px 0 0;
+  transition: color .15s, border-color .15s;
+}
+.tab:hover { color: var(--accent); }
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.topbar-right { display: flex; gap: 8px; }
+
+/* ---------- 面板 ---------- */
+
+.pane { padding: 18px 24px 32px; }
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.toolbar input,
+.toolbar select {
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.toolbar input:focus,
+.toolbar select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(26, 95, 208, .14);
+}
+
+/* ---------- 表格 ---------- */
+
+.grid {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 13px;
+}
+
+.grid th {
+  text-align: left;
+  color: var(--heading);
+  font-weight: 600;
+  background: var(--panel-alt);
+  border-bottom: 1px solid var(--line-strong);
+  padding: 9px 10px;
+  white-space: nowrap;
+}
+
+.grid td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.grid tr:last-child td { border-bottom: none; }
+.grid tbody tr:hover td { background: var(--panel-alt); }
+
+.epc-cell {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.tag {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.tag-in { background: rgba(18, 137, 74, .12); color: var(--in); }
+.tag-out { background: rgba(26, 95, 208, .12); color: var(--out); }
+.tag-unknown { background: rgba(107, 131, 171, .14); color: var(--muted); }
+.tag-dup { background: rgba(180, 83, 9, .12); color: var(--warn); }
+.tag-err { background: rgba(198, 40, 40, .12); color: var(--error); }
+.tag-ok { background: rgba(18, 137, 74, .12); color: var(--in); }
+.tag-pending { background: rgba(180, 83, 9, .12); color: var(--warn); }
+.tag-sent { background: rgba(26, 95, 208, .10); color: var(--out); }
+
+.row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+
+.btn-xs {
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  color: var(--accent);
+  border-radius: 5px;
+  padding: 3px 9px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.btn-xs:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-xs.danger { color: var(--error); border-color: var(--error); }
+.btn-xs.danger:hover { background: var(--error); border-color: var(--error); color: #fff; }
+
+/* ---------- 分页 ---------- */
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ---------- 上传页 ---------- */
+
+.card-block {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  max-width: 720px;
+  box-shadow: var(--shadow);
+}
+
+.card-block h2 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  color: var(--heading);
+}
+
+.kv { display: grid; grid-template-columns: 130px 1fr; gap: 6px 12px; margin: 0 0 12px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; color: var(--text); word-break: break-all; }
+
+code {
+  background: var(--panel-alt);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 12px;
+}
+
+/* ---------- 提示条 ---------- */
+
+.toast {
+  margin: 12px 24px 0;
+  padding: 9px 14px;
+  border-radius: 6px;
+  background: rgba(18, 137, 74, .12);
+  color: var(--in);
+  border: 1px solid rgba(18, 137, 74, .3);
+  font-size: 13px;
+}
+
+.toast.err {
+  background: rgba(198, 40, 40, .1);
+  color: var(--error);
+  border-color: rgba(198, 40, 40, .3);
+}
+
+/* ---------- 弹窗 ---------- */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 42, 92, .42);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  z-index: 50;
+}
+
+.modal-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 22px 24px;
+  box-shadow: 0 12px 32px rgba(15, 42, 92, .18);
+}
+
+.modal-card h2 {
+  margin: 0 0 14px;
+  font-size: 16px;
+  color: var(--heading);
+}
+
+.modal-card label {
+  display: block;
+  margin-bottom: 11px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.modal-card input {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 8px 11px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.modal-card input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(26, 95, 208, .14);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>后台管理 · 校园出入看板</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/admin.css">
+</head>
+<body class="admin-body">
+
+<!-- ---------- 登录 ---------- -->
+<div id="login" class="login-wrap" hidden>
+  <form id="login-form" class="login-card">
+    <h1>后台管理</h1>
+    <p class="muted">请输入管理员口令</p>
+    <input id="login-pwd" type="password" placeholder="口令" autocomplete="current-password" required>
+    <button type="submit" class="btn btn-block">登录</button>
+    <p id="login-err" class="err" hidden></p>
+    <a class="back-link" href="/">← 返回看板</a>
+  </form>
+</div>
+
+<!-- ---------- 主界面 ---------- -->
+<div id="app" hidden>
+  <header class="topbar">
+    <h1>后台管理</h1>
+    <nav class="tabs">
+      <button class="tab active" data-tab="students">学生管理</button>
+      <button class="tab" data-tab="swipes">刷卡记录</button>
+      <button class="tab" data-tab="upload">数据上传</button>
+    </nav>
+    <div class="topbar-right">
+      <a class="btn btn-ghost" href="/">看板</a>
+      <button id="logout" class="btn btn-ghost" type="button">退出</button>
+    </div>
+  </header>
+
+  <p id="toast" class="toast" hidden></p>
+
+  <!-- 学生管理 -->
+  <section class="pane" id="pane-students">
+    <div class="toolbar">
+      <input id="stu-filter" placeholder="搜索学号 / 姓名 / EPC">
+      <button id="stu-add" class="btn" type="button">+ 新增学生</button>
+    </div>
+    <table class="grid">
+      <thead><tr>
+        <th>EPC</th><th>学号</th><th>姓名</th><th>班级</th><th>状态</th><th>最近刷卡</th><th></th>
+      </tr></thead>
+      <tbody id="stu-body"></tbody>
+    </table>
+    <p id="stu-empty" class="muted pad" hidden>没有匹配的学生</p>
+  </section>
+
+  <!-- 刷卡记录 -->
+  <section class="pane" id="pane-swipes" hidden>
+    <div class="toolbar">
+      <input id="sw-name" placeholder="姓名">
+      <input id="sw-date" type="date">
+      <select id="sw-direction">
+        <option value="">全部方向</option>
+        <option value="in">入校</option>
+        <option value="out">出校</option>
+        <option value="unknown">未知</option>
+      </select>
+      <select id="sw-status">
+        <option value="">全部状态</option>
+        <option value="ok">正常</option>
+        <option value="duplicate">重复刷卡</option>
+        <option value="unknown_card">未登记卡</option>
+      </select>
+      <select id="sw-uploaded">
+        <option value="">全部</option>
+        <option value="no">未上传</option>
+        <option value="yes">已上传</option>
+      </select>
+      <button id="sw-search" class="btn" type="button">查询</button>
+      <button id="sw-reset" class="btn btn-ghost" type="button">重置</button>
+    </div>
+    <table class="grid">
+      <thead><tr>
+        <th>时间</th><th>姓名</th><th>学号</th><th>班级</th><th>EPC</th>
+        <th>方向</th><th>状态</th><th>上传</th><th></th>
+      </tr></thead>
+      <tbody id="sw-body"></tbody>
+    </table>
+    <p id="sw-empty" class="muted pad" hidden>没有匹配的记录</p>
+    <div class="pager">
+      <button id="sw-prev" class="btn btn-ghost" type="button">上一页</button>
+      <span id="sw-page"></span>
+      <button id="sw-next" class="btn btn-ghost" type="button">下一页</button>
+    </div>
+  </section>
+
+  <!-- 数据上传 -->
+  <section class="pane" id="pane-upload" hidden>
+    <div class="card-block">
+      <h2>当前配置</h2>
+      <dl class="kv" id="upload-cfg"></dl>
+      <p class="muted">
+        配置来自 <code>config.yaml</code> 或环境变量，修改后需重启容器才生效。
+      </p>
+      <p class="muted">
+        想改口令或上传参数，请编辑 <code>.env</code> 后执行
+        <code>docker compose up -d</code>。
+      </p>
+    </div>
+    <div class="card-block">
+      <h2>立即重传</h2>
+      <p class="muted">把所有「未上传」的刷卡记录立刻推一次。未配置 URL 时该操作无效。</p>
+      <button id="reupload" class="btn" type="button">立即重传一批</button>
+      <p id="reupload-result" class="muted"></p>
+    </div>
+  </section>
+</div>
+
+<!-- ---------- 学生编辑弹窗 ---------- -->
+<div id="modal" class="modal" hidden>
+  <div class="modal-card">
+    <h2 id="modal-title">新增学生</h2>
+    <form id="stu-form">
+      <label>EPC
+        <input id="f-epc" required maxlength="64" placeholder="E28011B0A50500756E79A1C9">
+      </label>
+      <label>学号
+        <input id="f-no" required maxlength="64" placeholder="1424764951">
+      </label>
+      <label>姓名
+        <input id="f-name" required maxlength="64" placeholder="李弘毅">
+      </label>
+      <label>班级
+        <input id="f-class" maxlength="64" placeholder="三年二班">
+      </label>
+      <p id="stu-err" class="err" hidden></p>
+      <div class="modal-actions">
+        <button type="button" id="modal-cancel" class="btn btn-ghost">取消</button>
+        <button type="submit" class="btn">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/static/admin.js"></script>
+</body>
+</html>

@@ -1,6 +1,12 @@
 'use strict';
 
-const state = { page: 1, size: 20, total: 0, beepOn: false, audioCtx: null };
+const state = {
+  page: 1, size: 20, total: 0,
+  beepOn: false, audioCtx: null,
+  // 出校语音播报：默认开。浏览器不支持 Web Speech 时静默回退,
+  // 因为预生成音频需要后端 TTS 缓存,这一版未做。
+  ttsOn: true,
+};
 
 const DIRECTION_LABEL = { in: '入校', out: '出校', unknown: '—' };
 const STATUS_LABEL = { ok: '', unknown_card: '未登记卡', duplicate: '重复刷卡' };
@@ -38,6 +44,46 @@ function beep(ok) {
   gain.connect(ctx.destination);
   osc.start();
   osc.stop(ctx.currentTime + (ok ? 0.09 : 0.3));
+}
+
+// 出校语音播报:姓名 + 班级 + 出校。
+// 优先用浏览器自带的 SpeechSynthesisUtterance,零依赖;
+// 不支持时静默回退(走 AudioContext 短促的双音提示,听感上差不多)。
+//
+// 不要拿未登记卡的 EPC 拼语音,听感差也会暴露卡号;
+function announceOut(event) {
+  if (!state.ttsOn) return;
+  if (event.direction !== 'out' || event.status !== 'ok') return;
+  const who = event.name ? `${event.name}${event.class_name ? `,${event.class_name}` : ''}` : '未知学生';
+  const text = `${who},出校`;
+
+  if (typeof window.speechSynthesis !== 'undefined' &&
+      typeof window.SpeechSynthesisUtterance === 'function') {
+    try {
+      window.speechSynthesis.cancel();  // 切到下一个再说,避免长队列
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'zh-CN';
+      u.rate = 1.05;
+      u.volume = 0.9;
+      window.speechSynthesis.speak(u);
+      return;
+    } catch (_e) { /* 静默回退 */ }
+  }
+  // 兜底:出校用一个上行的双音模拟一下
+  if (state.audioCtx) {
+    const ctx = state.audioCtx;
+    const o1 = ctx.createOscillator();
+    const o2 = ctx.createOscillator();
+    const gain = ctx.createGain();
+    o1.frequency.value = 660;
+    o2.frequency.value = 880;
+    o1.connect(gain); o2.connect(gain);
+    gain.connect(ctx.destination);
+    gain.gain.value = 0.15;
+    o1.start(); o2.start(ctx.currentTime + 0.12);
+    o1.stop(ctx.currentTime + 0.18);
+    o2.stop(ctx.currentTime + 0.3);
+  }
 }
 
 function renderStats(stats) {
@@ -88,6 +134,7 @@ function connectStream() {
   es.addEventListener('swipe', (e) => {
     const event = JSON.parse(e.data);
     pushLive(event);
+    announceOut(event);
     refreshStats();
     if (state.page === 1) loadHistory();
   });
@@ -112,6 +159,18 @@ async function pollHealth() {
   } catch (err) {
     dot.className = 'dot dot-bad';
     text.textContent = '服务不可用';
+  }
+}
+
+// 后台未启用时 /api/admin/whoami 返回 404 —— 那就隐藏「管理」入口，
+// 免得点了进去只得到一个登录框。
+async function probeAdmin() {
+  const link = document.getElementById('admin-link');
+  try {
+    const res = await fetch('/api/admin/whoami', { credentials: 'same-origin' });
+    link.hidden = !res.ok;
+  } catch (err) {
+    link.hidden = true;
   }
 }
 
@@ -186,8 +245,14 @@ function initBeep() {
     }
     state.audioCtx.resume();
     state.beepOn = !state.beepOn;
-    btn.textContent = state.beepOn ? '关闭提示音' : '开启提示音';
-    if (state.beepOn) beep(true);
+    state.ttsOn = state.beepOn;        // 两个开关同步,运维更简单
+    btn.textContent = state.beepOn ? '关闭提示音+语音' : '开启提示音+语音';
+    if (state.beepOn) {
+      beep(true);
+      // 顺手播一句示例:用最常见的姓名(避免暴露任何真实数据)
+      announceOut({ direction: 'out', status: 'ok',
+                    name: '示例同学', class_name: '三年级一班' });
+    }
   });
 }
 
@@ -197,6 +262,7 @@ function init() {
   refreshStats();
   loadHistory();
   pollHealth();
+  probeAdmin();
   setInterval(pollHealth, 5000);
 
   document.getElementById('query').addEventListener('submit', (e) => {

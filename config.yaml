@@ -11,5 +11,17 @@ use_device_beep: false
 
 # 看板自己的地址，仅供 tools/simulate.py 拼默认请求地址。
 # 实际监听端口由 uvicorn 命令行决定（Dockerfile 里是容器内的 8000，
-# 宿主机通过 HOST_PORT 映射，默认 9600）。
-http_port: 9600
+# 宿主机通过 HOST_PORT 映射，默认 10000）。
+http_port: 10000
+
+# 外部上传接收端（考勤系统对接用）—— 指向本地 Node 桥接服务 attendance-bridge
+# URL 为空或 enabled=false 时不上传
+upload_enabled: true
+upload_url: "http://127.0.0.1:9555/attendance"
+upload_token: "change-me-bridge-shared-secret"
+upload_timeout: 5.0
+upload_interval: 15.0
+upload_batch_size: 50
+
+# 后台管理登录口令。空串 = 禁用后台；前端通过 Cookie 维持登录态。
+admin_password: ""

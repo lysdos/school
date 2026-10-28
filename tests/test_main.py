@@ -32,6 +32,9 @@ def _cfg(tmp_path: Path) -> Config:
         rdr_repeated_time=50, dedup_window=10.0, duplicate_window=120.0,
         roster_file=REAL_XLSX, db_path=tmp_path / "campus.db",
         use_device_beep=False, http_port=8000,
+        upload_enabled=False, upload_url="", upload_token="",
+        upload_timeout=5.0, upload_interval=15.0, upload_batch_size=50,
+        admin_password="",
     )
 
 
@@ -110,9 +113,10 @@ def test_workers_stop_consumer_before_reader(tmp_path):
             order.append(f"stop:{self._name}")
 
     db = Database(tmp_path / "x.db")
-    workers = _Workers(Recorder("reader"), Recorder("consumer"), db)
+    workers = _Workers(Recorder("reader"), Recorder("consumer"),
+                       Recorder("upload"), db)
     workers.start()
     workers.stop()
 
-    assert order == ["start:reader", "start:consumer",
-                     "stop:consumer", "stop:reader"]
+    assert order == ["start:reader", "start:consumer", "start:upload",
+                     "stop:consumer", "stop:upload", "stop:reader"]

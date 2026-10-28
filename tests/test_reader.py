@@ -16,6 +16,9 @@ def cfg():
         rdr_repeated_time=50, dedup_window=10.0, duplicate_window=120.0,
         roster_file=Path("data/学生记录.xlsx"), db_path=Path("data/campus.db"),
         use_device_beep=False, http_port=8000,
+        upload_enabled=False, upload_url="", upload_token="",
+        upload_timeout=5.0, upload_interval=15.0, upload_batch_size=50,
+        admin_password="",
     )
 
 

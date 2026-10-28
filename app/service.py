@@ -152,7 +152,8 @@ class SwipeService:
         if log_now:
             event = self._db.insert_swipe(SwipeEvent(
                 id=None, epc=student.epc, student_no=student.student_no,
-                name=student.name, direction=direction,
+                name=student.name, class_name=student.class_name,
+                direction=direction,
                 status=SwipeStatus.OK if toggle else SwipeStatus.DUPLICATE,
                 rssi=tag.rssi, ant_id=tag.ant_id, reader_addr=tag.reader_addr,
                 swiped_at=now_iso,

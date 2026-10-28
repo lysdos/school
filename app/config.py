@@ -26,7 +26,16 @@ class Config:
     # 真正的监听端口由 uvicorn 命令行给（Dockerfile 里固定 8000）。
     # 在容器里跑 simulate.py 时，这个值应当是容器内部的端口，不是宿主机映射的端口。
     http_port: int
-
+    # 外部上传接收端的配置。URL 为空 = 关闭上传（默认），
+    # 让『没有外部系统』的场景零成本跑起来。
+    upload_enabled: bool
+    upload_url: str
+    upload_token: str          # Bearer Token;可留空
+    upload_timeout: float      # 单次请求超时，秒
+    upload_interval: float     # 轮询周期，秒
+    upload_batch_size: int     # 单批最大条数
+    # 后台管理页的登录口令。空串 = 禁用后台（默认）
+    admin_password: str
 
 DEFAULTS: dict[str, object] = {
     "rdr_host": "192.168.1.168",
@@ -40,6 +49,13 @@ DEFAULTS: dict[str, object] = {
     "db_path": "data/campus.db",
     "use_device_beep": False,
     "http_port": 8000,
+    "upload_enabled": False,
+    "upload_url": "",
+    "upload_token": "",
+    "upload_timeout": 5.0,
+    "upload_interval": 15.0,
+    "upload_batch_size": 50,
+    "admin_password": "",
 }
 
 ENV_MAP: dict[str, str] = {
@@ -54,6 +70,13 @@ ENV_MAP: dict[str, str] = {
     "db_path": "DB_PATH",
     "use_device_beep": "USE_DEVICE_BEEP",
     "http_port": "HTTP_PORT",
+    "upload_enabled": "UPLOAD_ENABLED",
+    "upload_url": "UPLOAD_URL",
+    "upload_token": "UPLOAD_TOKEN",
+    "upload_timeout": "UPLOAD_TIMEOUT",
+    "upload_interval": "UPLOAD_INTERVAL",
+    "upload_batch_size": "UPLOAD_BATCH_SIZE",
+    "admin_password": "ADMIN_PASSWORD",
 }
 
 _PATH_KEYS = ("roster_file", "db_path")

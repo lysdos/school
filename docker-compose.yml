@@ -3,11 +3,15 @@ services:
     build: .
     container_name: rfid-campus-demo
     ports:
-      # 宿主机端口默认 9000 而不是 8000：Windows 的「排除端口段」包含 7989-8088，
+      # 宿主机端口默认 10000 而不是 8000：Windows 的「排除端口段」包含 7989-8088，
       # Docker 绑定 0.0.0.0:8000 会被系统拒绝（报 "access permissions" 错误）。
       # 用 netsh interface ipv4 show excludedportrange protocol=tcp 可以查看本机的保留段。
       # 容器内部仍然是 8000，不受影响。
-      - "${HOST_PORT:-9600}:8000"
+      #
+      # 历史教训：9600 也被坑过 —— Windows 每次重启后动态保留段会漂移，
+      # 2026-10-20 重启后 9600 落进了 9529-9628，容器起不来（同样的 access permissions 报错）。
+      # 排除段外还有空档，出问题时换个端口 + 改这里的默认值和 config.yaml 的 http_port 即可。
+      - "${HOST_PORT:-10000}:8000"
     volumes:
       - ./data:/app/data
     environment:
@@ -21,6 +25,19 @@ services:
       DUPLICATE_WINDOW: "120"
       USE_DEVICE_BEEP: "0"
       # simulate.py 拼默认请求地址用。容器内 uvicorn 监听的是 8000，
-      # 不是宿主机映射的 9600 —— 在容器里跑 simulate.py 时用这个值才对。
+      # 不是宿主机映射的 10000 —— 在容器里跑 simulate.py 时用这个值才对。
       HTTP_PORT: "8000"
+      # 外部上传（默认关）。配置时改成 "1" 并填 URL / Token。
+      UPLOAD_ENABLED: "0"
+      UPLOAD_URL: ""
+      UPLOAD_TOKEN: ""
+      UPLOAD_TIMEOUT: "5"
+      UPLOAD_INTERVAL: "15"
+      UPLOAD_BATCH_SIZE: "50"
+      # 后台管理口令。这里不写默认值,让 .env 或主机环境覆盖:
+      #   - 留空 = 后台禁用(默认);
+      #   - 设非空 = 后台启用。
+      # 历史踩坑:曾在 compose 里写 `ADMIN_PASSWORD: ""`,这会『赢过』
+      # .env 的同名值,导致怎么设都不生效 —— 改成下面这种写法就好。
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     restart: unless-stopped

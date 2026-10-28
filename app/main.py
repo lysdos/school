@@ -21,30 +21,40 @@ from .models import RawTagEvent, swipe_to_dict
 from .reader import ReaderClient
 from .roster import import_roster
 from .service import SwipeConsumer, SwipeService
+from .upload import UploadWorker
 
 CONFIG_PATH = Path("config.yaml")
 
 
 class _Workers:
-    """读卡线程、消费线程与数据库连接的生命周期持有者，由 FastAPI 的 lifespan 驱动。"""
+    """读卡线程、消费线程、上传线程与数据库连接的生命周期持有者，
+    由 FastAPI 的 lifespan 驱动。
+    """
 
-    def __init__(self, reader: Any, consumer: SwipeConsumer, db: Database):
+    def __init__(self, reader: Any, consumer: SwipeConsumer, upload: UploadWorker,
+                 db: Database):
         self._reader = reader
         self._consumer = consumer
+        self._upload = upload
         self._db = db
 
     def start(self) -> None:
         self._reader.start()
         self._consumer.start()
+        # 上传 worker 自身有 enabled 判断，禁用了也是空操作
+        self._upload.start()
 
     def stop(self) -> None:
-        # 先停消费线程再停读卡器：反过来会让读卡器还在往队列里塞事件时消费端已经没了
+        # 倒序关闭:先停消费线程,再停上传,最后停读卡器
+        # —— 上传依赖数据库存活的 swipes,读卡器依赖队列没人塞
         self._consumer.stop()
+        self._upload.stop()
         self._reader.stop()
         self._db.close()
 
 
-def build(cfg: Config | None = None, reader: Any = None) -> FastAPI:
+def build(cfg: Config | None = None, reader: Any = None,
+          upload: UploadWorker | None = None) -> FastAPI:
     cfg = cfg if cfg is not None else load_config(CONFIG_PATH)
 
     db = Database(cfg.db_path)
@@ -55,6 +65,9 @@ def build(cfg: Config | None = None, reader: Any = None) -> FastAPI:
         print(f"[roster] 警告：名单文件不存在 {cfg.roster_file}，跳过导入")
     except ValueError as exc:
         print(f"[roster] 警告：{exc}，跳过导入")
+
+    if upload is None:
+        upload = UploadWorker(cfg, db)
 
     bus = EventBus()
     service = SwipeService(db, cfg.dedup_window, cfg.duplicate_window)
@@ -68,7 +81,8 @@ def build(cfg: Config | None = None, reader: Any = None) -> FastAPI:
     )
 
     return api.create_app(cfg, db, service, reader, bus,
-                          workers=_Workers(reader, consumer, db))
+                          workers=_Workers(reader, consumer, upload, db),
+                          upload=upload)
 
 
 def create_app() -> FastAPI:

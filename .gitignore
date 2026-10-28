@@ -11,3 +11,7 @@ data/*.db-shm
 
 # SDD 工作区（ledger、brief、报告等临时产物）
 .superpowers/
+
+# 本地环境变量与临时数据库
+.env
+_t.db

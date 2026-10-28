@@ -13,20 +13,24 @@ mkdir -p data && cp "E:/Code/school/学生记录.xlsx" data/
 docker compose up --build -d
 
 # 3. 打开看板
-#    http://localhost:9600
-#    接口文档 http://localhost:9600/docs
+#    http://localhost:10000
+#    接口文档 http://localhost:10000/docs
 ```
 
-> **为什么是 9600 而不是 8000？** Windows 的「排除端口段」默认包含 7989–8088，
+> **为什么是 10000 而不是 8000？** Windows 的「排除端口段」包含 7989–8088，
 > Docker 绑定 `0.0.0.0:8000` 会被系统拒绝并报 `access permissions` 错误。
 > 用 `netsh interface ipv4 show excludedportrange protocol=tcp` 可以查看本机的保留段。
 >
-> 换端口：`HOST_PORT=9700 docker compose up -d`
+> 历史教训：9600 也中过招 —— Windows 每次重启后动态保留段会漂移，
+> 2026-10-20 重启后 9600 落进了 9529–9628，容器起不来（同样的 `access permissions` 报错）。
+> 排除段不是固定的，换端口前一定要先跑一遍上面的 netsh 命令确认。
+>
+> 换端口：`HOST_PORT=10001 docker compose up -d`
 > （先确认该端口既不在保留段内、也没被别的程序占用）。
 > 容器内部始终监听 8000，不受影响。
 >
 > 从宿主机跑模拟器时要指到映射后的端口：
-> `python tools/simulate.py --base-url http://127.0.0.1:9600`；
+> `python tools/simulate.py --base-url http://127.0.0.1:10000`；
 > 或者直接在容器里跑，就不用管端口：`docker compose exec campus python tools/simulate.py`
 
 ## 本地开发（不用 Docker）
@@ -59,13 +63,76 @@ python tools/simulate.py --direct        # 绕过 HTTP，直接读写数据库
 也可以直接调接口：
 
 ```bash
-curl -X POST http://localhost:9600/api/reset
+curl -X POST http://localhost:10000/api/reset
 # {"cleared_swipes":4178,"reset_students":6}
 ```
 
 > 注意：清空后如果读卡器范围内还有标签，它们会立刻重新上报一次
 > （去重表也一起清了，这是「真清空」该有的行为）。想让看板保持干净，
 > 把标签拿远再点清空。
+
+## 出校语音播报
+
+浏览器右上角「开启提示音+语音」开起来后,每次有人正常出校(`direction=out`,
+`status=ok`),浏览器会用中文播一遍「姓名,X 班,出校」。
+
+- 优先用浏览器自带的 SpeechSynthesisUtterance(`SpeechSynthesisUtterance`,
+  zh-CN),零依赖。
+- 不支持的浏览器回退到双音提示,**不会** 装作播了。
+- 注意:同一浏览器的 `speechSynthesis` 队列有长度上限,所以代码里每次先
+  `cancel()` 再 `speak()`,常驻标签反复上报时只会播最新一条,不会堆积。
+
+需要关掉就再点一次按钮。
+
+## 后台管理(考勤系统对接)
+
+`config.yaml` 里设 `admin_password` 之后,`/api/admin/*` 整组接口启用,顶栏
+也会出现一个「管理」入口(默认隐藏)。
+
+后台能做四件事:
+
+1. **学生增删改**(连 `EPC ↔ 学号 ↔ 姓名 ↔ 班级`):跟 xlsx 同步写,
+   `upsert_student` 是幂等的,不会清空在馆状态。
+2. **刷卡记录查询 / 修订 / 删除**:支持按姓名、日期、方向、状态、是否已
+   上传做组合过滤;修订可以改 `direction`、`status`、`swiped_at` 一项或多项。
+3. **立即重传**:点一下就把所有 `uploaded_at IS NULL` 的记录立刻
+   POST 给接收端。
+4. **查看上传配置**:`/api/admin/upload/config` 给出当前生效的 URL/Token/参数。
+   修改仍走环境变量(下面)。
+
+```bash
+curl -c /tmp/c.txt -X POST localhost:10000/api/admin/login \
+  -H 'Content-Type: application/json' \
+  -d '{"password":"your-password"}'
+
+curl -b /tmp/c.txt localhost:10000/api/admin/students
+```
+
+## 数据上传(考勤系统对接)
+
+worker 每 15 秒拉一批 `uploaded_at IS NULL` 的刷卡记录,POST 到配置的目标 URL。
+
+- 接收端期望的请求格式:`POST <url>`,Header `Content-Type: application/json`,
+  可选 `Authorization: Bearer <token>`,Body 是 `{"events": [<swipe>, ...]}`。
+  单条内容跟看板 SSE 推的 `event: swipe` 数据相同(包含姓名、班级、
+  方向、状态、时间戳等),可以直接存为考勤系统的考勤记录。
+- 2xx 视为成功,worker 把这一批的 `uploaded_at` 戳上;
+  非 2xx 或网络错误整批留到下一轮再试。
+- 没配置 `UPLOAD_URL` 或 `UPLOAD_ENABLED` 不是 `1` 时 worker 不启动,
+  零额外开销,演示场景不接对接系统也能照跑。
+
+```yaml
+# config.yaml 示例
+upload_enabled: true
+upload_url: "https://school-platform.example.com/api/attendance/ingest"
+upload_token: "your-bearer-token"
+upload_timeout: 5.0
+upload_interval: 15.0
+upload_batch_size: 50
+```
+
+`tools/update_roster_with_class.py` 用来把现有的 3 列名单 xlsx
+(只有 EPC/学号/姓名)升级到 4 列,把班级留空,后台或 Excel 填完就行。
 
 ## 配置
 
@@ -81,6 +148,13 @@ curl -X POST http://localhost:9600/api/reset
 | `DUPLICATE_WINDOW` | `120` | 秒；此窗口内标记「重复刷卡」且不翻转状态 |
 | `USE_DEVICE_BEEP` | `0` | 设备蜂鸣器，见下方说明 |
 | `TZ` | `Asia/Shanghai` | **必须设置**，否则今日统计按 UTC 算会差 8 小时 |
+| `UPLOAD_ENABLED` | `0` | `1` 时启动上传 worker（还需 `UPLOAD_URL` 非空） |
+| `UPLOAD_URL` | `""` | 接收 swipes 的 HTTP 端点 |
+| `UPLOAD_TOKEN` | `""` | Bearer Token；可留空 |
+| `UPLOAD_TIMEOUT` | `5` | 单次 HTTP 超时秒数 |
+| `UPLOAD_INTERVAL` | `15` | 轮询间隔秒数 |
+| `UPLOAD_BATCH_SIZE` | `50` | 单批最多条数 |
+| `ADMIN_PASSWORD` | `""` | 后台管理口令；**留空时整个后台不挂路由**，从外部探测不到 |
 
 ## 已知限制
 

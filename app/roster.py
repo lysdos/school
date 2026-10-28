@@ -11,7 +11,10 @@ from openpyxl import load_workbook
 from .db import Database
 from .models import normalize_epc
 
-EXPECTED_HEADERS = ("EPC", "学号", "姓名")
+# 历史 3 列格式仍然兼容: 没有班级列时 class_name = None
+# 新格式推荐 4 列: EPC / 学号 / 姓名 / 班级
+EXPECTED_HEADERS_3 = ("EPC", "学号", "姓名")
+EXPECTED_HEADERS_4 = ("EPC", "学号", "姓名", "班级")
 
 
 def _cell_text(value: Any) -> str:
@@ -34,23 +37,32 @@ def import_roster(db: Database, xlsx_path: Path) -> int:
         rows: Iterable[tuple] = sheet.iter_rows(values_only=True)
 
         try:
-            header = tuple(_cell_text(c) for c in next(rows)[:3])
+            raw_header = tuple(_cell_text(c) for c in next(rows))
         except StopIteration:
             raise ValueError(f"名单文件为空: {path}") from None
 
-        if header != EXPECTED_HEADERS:
-            raise ValueError(f"表头不符，期望 {EXPECTED_HEADERS}，实际 {header}")
+        if raw_header[:4] == EXPECTED_HEADERS_4:
+            header_len = 4
+        elif raw_header[:3] == EXPECTED_HEADERS_3:
+            header_len = 3
+        else:
+            raise ValueError(
+                f"表头不符，期望 {EXPECTED_HEADERS_4} 或 {EXPECTED_HEADERS_3}，"
+                f"实际 {raw_header}"
+            )
 
         created_at = datetime.now().isoformat(timespec="seconds")
         count = 0
         for row in rows:
-            cells = list(row[:3]) + [None] * (3 - len(row[:3]))
+            cells = list(row[:header_len]) + [None] * (header_len - len(row[:header_len]))
             epc = normalize_epc(_cell_text(cells[0]))
             student_no = _cell_text(cells[1])
             name = _cell_text(cells[2])
+            class_name = _cell_text(cells[3]) if header_len == 4 else None
             if not epc or not student_no or not name:
                 continue
-            db.upsert_student(epc, student_no, name, created_at)
+            db.upsert_student(epc, student_no, name, created_at,
+                              class_name=class_name or None)
             count += 1
         return count
     finally:

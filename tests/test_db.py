@@ -205,3 +205,43 @@ def test_indexes_exist(db):
     assert "idx_swipes_swiped_at" in names
     assert "idx_swipes_epc" in names
     assert "idx_swipes_no_date" in names
+    assert "idx_swipes_pending" in names
+
+
+def test_database_init_handles_swipes_without_uploaded_at(tmp_path):
+    """老库里 swipes 表没有 uploaded_at 时也得能正常打开。
+
+    这是真机部署后才会撞上的回归:之前 SCHEMA 里直接把
+    CREATE INDEX ON swipes(uploaded_at) 放进 executescript,
+    在已存在但还没 uploaded_at 列的 swipes 表上会失败,
+    App 直接挂掉。修复方案是把这条索引挪到 _migrate 之后。
+    """
+    import sqlite3
+    db_path = tmp_path / "legacy.db"
+    con = sqlite3.connect(str(db_path))
+    con.executescript("""
+    CREATE TABLE students (epc TEXT PRIMARY KEY, student_no TEXT, name TEXT,
+                          in_campus INTEGER, last_swipe_at TEXT,
+                          last_logged_at TEXT, state_date TEXT,
+                          created_at TEXT NOT NULL);
+    CREATE TABLE swipes (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                         epc TEXT, student_no TEXT, name TEXT,
+                         direction TEXT NOT NULL, status TEXT NOT NULL,
+                         rssi INTEGER, ant_id INTEGER, reader_addr TEXT,
+                         swiped_at TEXT NOT NULL, created_at TEXT NOT NULL);
+    """)
+    con.commit()
+    con.close()
+
+    # 重新走 init:迁移要跑通,索引也要在 uploaded_at 补完后建出来
+    d = Database(db_path)
+    try:
+        cols = {r["name"] for r in d._conn.execute("PRAGMA table_info(swipes)")}
+        assert "uploaded_at" in cols
+        assert "class_name" in cols
+        idx = {r["name"] for r in d._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index'"
+        ).fetchall()}
+        assert "idx_swipes_pending" in idx
+    finally:
+        d.close()

@@ -22,6 +22,12 @@
 
 * { box-sizing: border-box; }
 
+/* `hidden` 属性只等价于 UA 侧的 `display: none`，
+ * 任何 author 侧的 display 声明都会盖掉它。
+ * 例如顶栏里 `<a class="btn" hidden>` 的 .btn 将来若加了
+ * `display: inline-flex`，隐藏就会失效。所有隐藏都靠这条兜住。 */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   min-height: 100vh;

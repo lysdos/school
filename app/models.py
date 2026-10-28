@@ -23,6 +23,7 @@ class Student:
     epc: str
     student_no: str
     name: str
+    class_name: str | None = None
     in_campus: bool = False
     # 状态锚点：每次有效读到就刷新。保证学生在读卡范围内逗留时「在校」状态不来回翻。
     last_swipe_at: str | None = None
@@ -51,12 +52,14 @@ class SwipeEvent:
     epc: str
     student_no: str | None
     name: str | None
-    direction: Direction
-    status: SwipeStatus
-    rssi: int | None
-    ant_id: int | None
-    reader_addr: str
-    swiped_at: str
+    class_name: str | None = None
+    direction: Direction = Direction.UNKNOWN
+    status: SwipeStatus = SwipeStatus.OK
+    rssi: int | None = None
+    ant_id: int | None = None
+    reader_addr: str | None = None
+    swiped_at: str | None = None
+    uploaded_at: str | None = None
 
 
 def normalize_epc(epc: str) -> str:
@@ -71,12 +74,14 @@ def swipe_to_dict(event: SwipeEvent) -> dict:
         "epc": event.epc,
         "student_no": event.student_no,
         "name": event.name,
+        "class_name": event.class_name,
         "direction": event.direction.value,
         "status": event.status.value,
         "rssi": event.rssi,
         "ant_id": event.ant_id,
         "reader_addr": event.reader_addr,
         "swiped_at": event.swiped_at,
+        "uploaded_at": event.uploaded_at,
     }
 
 
@@ -85,6 +90,7 @@ def student_to_dict(student: Student) -> dict:
         "epc": student.epc,
         "student_no": student.student_no,
         "name": student.name,
+        "class_name": student.class_name,
         "in_campus": student.in_campus,
         "last_swipe_at": student.last_swipe_at,
     }

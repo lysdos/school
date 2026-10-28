@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -18,6 +18,7 @@ from .config import Config, describe_timezone
 from .db import Database
 from .models import RawTagEvent, student_to_dict, swipe_to_dict
 from .service import SwipeService
+from .upload import UploadWorker
 
 WEB_DIR = Path(__file__).parent / "web"
 
@@ -25,7 +26,8 @@ SSE_KEEPALIVE_SECONDS = 15.0
 
 
 def create_app(cfg: Config, db: Database, service: SwipeService,
-               reader: Any, bus: EventBus, workers: Any = None) -> FastAPI:
+               reader: Any, bus: EventBus, workers: Any = None,
+               upload: UploadWorker | None = None) -> FastAPI:
     """装配 FastAPI 应用。
 
     workers 是一个有 start() / stop() 的对象（读卡线程与消费线程的持有者），
@@ -132,6 +134,46 @@ def create_app(cfg: Config, db: Database, service: SwipeService,
         return result
 
     if WEB_DIR.exists():
-        app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
+        # 把静态资源挂到 /static/,根路径用一个 GET 显式返回 index.html;
+        # 这样不会把所有未匹配到的请求都重定向到静态文件,
+        # 也不会拦截其它动词(POST/PATCH/DELETE)的后台接口。
+        app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="web-static")
+
+        from fastapi.responses import FileResponse
+
+        @app.get("/", include_in_schema=False)
+        def _index() -> FileResponse:
+            return FileResponse(str(WEB_DIR / "index.html"))
+
+        # 后台管理页面。**刻意在 admin_password 为空时也提供**:
+        # 页面本身不含任何数据,真正的接口全部 404,打开只会看到登录框
+        # 然后提示口令错误。这样"后台是否存在"仍然无法从接口侧探测,
+        # 而知道地址的人能直接打开页面、填口令。
+        admin_html = WEB_DIR / "admin.html"
+
+        @app.get("/admin", include_in_schema=False)
+        def _admin_page() -> FileResponse:
+            if not admin_html.exists():
+                raise HTTPException(status_code=404, detail="后台页面缺失")
+            return FileResponse(str(admin_html))
+
+        # 兼容 /admin/ 的写法（有人会习惯加斜杠）
+        @app.get("/admin/", include_in_schema=False)
+        def _admin_page_slash() -> FileResponse:
+            return _admin_page()
+    else:
+        # 没有 web 目录时不挂静态资源,留个最简 GET /
+        @app.get("/", include_in_schema=False)
+        def _index_fallback() -> dict:
+            return {"name": "rfid-campus-demo"}
+
+    # 管理后台 — 仅当 admin_password 非空时启用；启用前先 import,
+    # 所以即便没启用也不报 ImportError。
+    from . import admin as admin_mod
+    if upload is not None:
+        admin_mod.mount_admin(app, cfg, db, upload)
+    else:
+        # 没上传 worker 时不让后台路由挂上(否则管理员点不到东西)。
+        pass
 
     return app
